@@ -356,7 +356,55 @@ def debug_page():
                 }
             }
             
-            loadDebugInfo();
+        </script>
+    </body>
+    </html>
+    """
+
+@app.route('/api/emails')
+def get_emails():
+    return jsonify(current_email_data)
+
+@app.route('/api/refresh', methods=['POST'])
+def refresh_emails():
+    web_assistant.process_emails_for_web()
+    return jsonify({'status': 'success'})
+
+@app.route('/api/create-drafts', methods=['POST'])
+def create_drafts():
+    try:
+        high_priority_emails = []
+        for email_dict in current_email_data.get('direct_emails', []):
+            if email_dict.get('priority') in ['high', 'critical']:
+                high_priority_emails.append(email_dict)
+        
+        return jsonify({
+            'status': 'success',
+            'drafts_created': 0,
+            'high_priority_emails': len(high_priority_emails),
+            'message': f'Found {len(high_priority_emails)} high-priority emails (Demo mode - drafts not actually created)'
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/api/debug')
+def debug_info():
+    debug_data = {
+        'total_emails': len(current_email_data.get('all_emails', [])),
+        'direct_emails': len(current_email_data.get('direct_emails', [])),
+        'cc_emails': len(current_email_data.get('cc_emails', [])),
+        'stats': current_email_data.get('stats', {}),
+        'last_updated': current_email_data.get('last_updated'),
+        'demo_mode': current_email_data.get('demo_mode', True),
+        'sample_emails': current_email_data.get('all_emails', [])[:3]
+    }
+    return jsonify(debug_data)
+
+# Initialize data on startup
+web_assistant.process_emails_for_web()
+
+if __name__ == '__main__':
+    app.run(debug=True)
         </script>
     </body>
     </html>
