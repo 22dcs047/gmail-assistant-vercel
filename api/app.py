@@ -339,6 +339,61 @@ def debug_page():
         <div class="container">
             <h1>🔍 Gmail Assistant Debug</h1>
             <button class="btn" onclick="loadDebugInfo()">Refresh Debug Info</button>
+        <button class="btn" onclick="window.location.href='/'">Back to Home</button>
+        
+        <h3>📊 Debug Information</h3>
+        <pre id="debugInfo">Loading...</pre>
+    </div>
+
+    <script>
+        async function loadDebugInfo() {
+            try {
+                const response = await fetch('/api/debug');
+                const data = await response.json();
+                document.getElementById('debugInfo').textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('debugInfo').textContent = 'Error: ' + error.message;
+            }
+        }
+        loadDebugInfo();
+    </script>
+</body>
+</html>'''
+
+@app.route('/api/emails')
+def get_emails():
+    return categorize_emails()
+
+@app.route('/api/refresh', methods=['POST'])
+def refresh_emails():
+    return {'status': 'success'}
+
+@app.route('/api/create-drafts', methods=['POST'])
+def create_drafts():
+    data = categorize_emails()
+    high_priority = [email for email in data['direct_emails'] if email['priority'] in ['high', 'critical']]
+    return {
+        'status': 'success',
+        'drafts_created': 0,
+        'high_priority_emails': len(high_priority),
+        'message': f'Found {len(high_priority)} high-priority emails (Demo mode)'
+    }
+
+@app.route('/api/debug')
+def debug_info():
+    data = categorize_emails()
+    return {
+        'total_emails': data['stats']['total_unread'],
+        'direct_emails': data['stats']['direct_count'],
+        'cc_emails': data['stats']['cc_count'],
+        'stats': data['stats'],
+        'last_updated': data['last_updated'],
+        'demo_mode': True,
+        'sample_emails': data['all_emails'][:3]
+    }
+
+if __name__ == '__main__':
+    app.run(debug=True)">Refresh Debug Info</button>
             <button class="btn" onclick="window.location.href='/'">Back to Home</button>
             
             <h3>📊 Debug Information</h3>
