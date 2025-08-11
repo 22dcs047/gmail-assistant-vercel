@@ -244,12 +244,93 @@ def dashboard():
         
         async function createDrafts() {
             try {
+                // Show loading state
+                const button = event.target;
+                const originalText = button.innerHTML;
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating Drafts...';
+                button.disabled = true;
+                
                 const response = await fetch('/api/create-drafts', { method: 'POST' });
                 const result = await response.json();
-                alert(`Found ${result.high_priority_emails} high-priority emails. ${result.message}`);
+                
+                if (result.status === 'success') {
+                    if (result.drafts_created && result.drafts_created.length > 0) {
+                        // Show detailed results in a modal
+                        showDraftResults(result.drafts_created, result.high_priority_emails);
+                    } else {
+                        alert(`${result.message}`);
+                    }
+                } else {
+                    alert('Error: ' + result.message);
+                }
+                
+                // Reset button
+                button.innerHTML = originalText;
+                button.disabled = false;
+                
             } catch (error) {
-                alert('Error creating drafts');
+                alert('Error creating drafts: ' + error.message);
+                // Reset button
+                const button = event.target;
+                button.innerHTML = '<i class="fas fa-edit"></i> Create Auto-Reply Drafts';
+                button.disabled = false;
             }
+        }
+        
+        function showDraftResults(drafts, totalHighPriority) {
+            const modal = document.getElementById('emailModal');
+            document.getElementById('modalTitle').innerHTML = '<i class="fas fa-check-circle" style="color: #28a745;"></i> Auto-Reply Drafts Created!';
+            
+            let html = `
+                <div style="margin-bottom: 25px; padding: 20px; background: #d4edda; border: 1px solid #c3e6cb; border-radius: 10px; color: #155724;">
+                    <h4 style="margin: 0 0 10px 0;"><i class="fas fa-check-circle"></i> Success!</h4>
+                    <p style="margin: 0;">Created <strong>${drafts.length}</strong> auto-reply drafts for high-priority emails.</p>
+                </div>
+                
+                <h4 style="color: #2c3e50; margin-bottom: 15px;">Generated Draft Replies:</h4>
+            `;
+            
+            drafts.forEach((draft, index) => {
+                const priorityColor = {
+                    'critical': '#dc3545',
+                    'high': '#fd7e14',
+                    'medium': '#ffc107',
+                    'low': '#28a745'
+                }[draft.priority] || '#6c757d';
+                
+                html += `
+                    <div style="margin-bottom: 20px; border: 1px solid #dee2e6; border-radius: 10px; overflow: hidden;">
+                        <div style="background: ${priorityColor}; color: white; padding: 10px; font-weight: 600;">
+                            <i class="fas fa-reply"></i> Draft ${index + 1}: ${draft.priority.toUpperCase()} Priority
+                        </div>
+                        <div style="padding: 15px; background: #f8f9fa;">
+                            <p><strong>To:</strong> ${draft.to}</p>
+                            <p><strong>Subject:</strong> ${draft.subject}</p>
+                            <p><strong>Response Time:</strong> ${draft.response_timeframe}</p>
+                            <p><strong>Original Email:</strong> ${draft.original_subject}</p>
+                        </div>
+                        <div style="padding: 15px; background: white; max-height: 200px; overflow-y: auto;">
+                            <strong>Draft Content:</strong>
+                            <div style="margin-top: 10px; border: 1px solid #ddd; padding: 10px; border-radius: 5px; font-size: 0.9rem;">
+                                ${draft.body}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += `
+                <div style="margin-top: 25px; padding: 15px; background: #e3f2fd; border-radius: 10px; border-left: 4px solid #2196f3;">
+                    <h5 style="color: #1976d2; margin-bottom: 8px;"><i class="fas fa-info-circle"></i> Next Steps</h5>
+                    <p style="color: #1565c0; margin: 0;">
+                        <strong>📝 Note:</strong> These are draft templates showing how auto-replies would be generated. 
+                        In a production environment, these would be automatically saved as drafts in your Gmail account.
+                    </p>
+                </div>
+            `;
+            
+            document.getElementById('modalBody').innerHTML = html;
+            modal.style.display = 'block';
         }
         
         function exportEmails() {
@@ -320,13 +401,125 @@ def api_refresh():
 
 @app.route('/api/create-drafts', methods=['POST'])
 def api_create_drafts():
-    data = get_stats()
-    high_priority = [e for e in data['direct_emails'] if e['priority'] in ['high', 'critical']]
-    return jsonify({
-        'status': 'success',
-        'high_priority_emails': len(high_priority),
-        'message': f'Found {len(high_priority)} high-priority emails (Demo mode)'
-    })
+    try:
+        data = get_stats()
+        high_priority_emails = [e for e in data['direct_emails'] if e['priority'] in ['high', 'critical']]
+        
+        if not high_priority_emails:
+            return jsonify({
+                'status': 'success',
+                'high_priority_emails': 0,
+                'drafts_created': [],
+                'message': 'No high-priority emails found to create drafts for.'
+            })
+        
+        # Generate actual draft replies
+        drafts_created = []
+        
+        for email in high_priority_emails:
+            draft_reply = generate_auto_reply_draft(email)
+            drafts_created.append(draft_reply)
+        
+        return jsonify({
+            'status': 'success',
+            'high_priority_emails': len(high_priority_emails),
+            'drafts_created': drafts_created,
+            'message': f'Successfully created {len(drafts_created)} auto-reply drafts for high-priority emails!'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Error creating drafts: {str(e)}'
+        })
+
+def generate_auto_reply_draft(email):
+    """Generate professional auto-reply draft"""
+    
+    # Extract clean email address
+    from_email = email['from_email']
+    if '<' in from_email:
+        import re
+        match = re.search(r'<([^>]+)>', from_email)
+        from_email = match.group(1) if match else from_email
+    
+    # Determine response timeframe based on email type
+    timeframes = {
+        'academic': '2-4 hours',
+        'security': '1-2 hours', 
+        'general': '24-48 hours',
+        'newsletter': '48-72 hours'
+    }
+    
+    response_timeframe = timeframes.get(email['email_type'], '24-48 hours')
+    
+    # Create smart subject line
+    clean_subject = email['subject'].replace('Re: ', '').replace('Fwd: ', '')
+    smart_subject = f"Re: {clean_subject} - Acknowledged"
+    
+    # Generate personalized body content
+    body_content = f"""
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px;">
+        <p>Dear Sender,</p>
+        
+        <p>Thank you for your email regarding <strong>"{email['subject']}"</strong>. I have received your message and will review it carefully.</p>
+        
+        <p>I will get back to you within <strong>{response_timeframe}</strong>.</p>
+    """
+    
+    # Add priority-specific content
+    if email['priority'] == 'critical':
+        body_content += """
+        <p style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 5px;">
+            <strong>⚠️ Note:</strong> I understand this is critical priority and will respond as soon as possible.
+        </p>
+        """
+    elif email['priority'] == 'high':
+        body_content += """
+        <p style="background: #e7f3ff; border: 1px solid #74b9ff; padding: 10px; border-radius: 5px;">
+            <strong>🔴 Note:</strong> I understand this is high priority and will respond promptly.
+        </p>
+        """
+    
+    # Add email type specific content
+    if email['email_type'] == 'academic':
+        body_content += """
+        <p>As this appears to be academic-related, I will prioritize reviewing any assignment details or requirements mentioned.</p>
+        """
+    elif email['email_type'] == 'security':
+        body_content += """
+        <p>I take security matters seriously and will address this promptly.</p>
+        """
+    
+    # Add closing and signature
+    body_content += f"""
+        <p>Thank you for your patience.</p>
+        
+        <br>
+        <div style="border-top: 1px solid #eee; padding-top: 15px;">
+            <p><strong>Best regards,</strong><br>
+            <strong>Jai Mehtani</strong><br>
+            <em>Computer Science Student & Developer</em><br>
+            Charusat University<br>
+            📧 22dcs047@charusat.edu.in</p>
+            
+            <p style="font-size: 11px; color: #666; margin-top: 20px;">
+                <em>This is an automated acknowledgment. I will personally review and respond to your email.</em>
+            </p>
+        </div>
+    </div>
+    """
+    
+    return {
+        'to': from_email,
+        'subject': smart_subject,
+        'body': body_content,
+        'priority': email['priority'],
+        'email_type': email['email_type'],
+        'response_timeframe': response_timeframe,
+        'original_subject': email['subject'],
+        'created_at': datetime.now().isoformat()
+    }
 
 @app.route('/api/debug')
 def api_debug():
