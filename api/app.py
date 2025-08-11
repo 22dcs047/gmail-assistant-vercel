@@ -1,352 +1,302 @@
-import os
-import json
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
-from dataclasses import dataclass
-import threading
-import time
-
-# For production deployment
-from flask import Flask, render_template, jsonify, request
-
-# Simplified EmailData class for deployment
-@dataclass
-class EmailData:
-    id: str
-    from_email: str
-    subject: str
-    body: str
-    snippet: str
-    date: str
-    time: str
-    to_field: str
-    cc_field: str
-    priority: str
-    email_type: str
+from flask import Flask, jsonify
+from datetime import datetime
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
-# Global variables to store email data
-current_email_data = {
-    'all_emails': [],
-    'direct_emails': [],
-    'cc_emails': [],
-    'stats': {},
-    'last_updated': None,
-    'is_processing': False,
-    'error_message': None,
-    'demo_mode': True  # Always demo mode in production
-}
+# Sample data
+emails = [
+    {'id': '1', 'subject': 'Chess Tournament Invitation', 'from_email': 'Chess.com', 'priority': 'medium', 'to_field': '22dcs047@charusat.edu.in', 'cc_field': '', 'snippet': 'Join our chess tournament...', 'body': 'Hungry for a new chess challenge? Join our latest tournament and test your skills against our advanced chess bots.', 'date': '2025-08-08', 'time': '08:30', 'email_type': 'general'},
+    {'id': '2', 'subject': 'Kaggle Competition: AI Red Team Challenge', 'from_email': 'Kaggle', 'priority': 'high', 'to_field': '22dcs047@charusat.edu.in', 'cc_field': '', 'snippet': 'Join the red-teaming challenge...', 'body': 'Hi Jai Mehtani, Join the red-teaming challenge and discover new vulnerabilities in a newly released model. Prize pool of $50,000!', 'date': '2025-08-07', 'time': '19:29', 'email_type': 'academic'},
+    {'id': '3', 'subject': 'Assignment Deadline Extended', 'from_email': 'Professor Smith', 'priority': 'high', 'to_field': 'class2024@charusat.edu.in', 'cc_field': '22dcs047@charusat.edu.in', 'snippet': 'Deadline extended to Friday...', 'body': 'Dear Students, The deadline for the final project has been extended to next Friday due to technical issues.', 'date': '2025-08-08', 'time': '14:30', 'email_type': 'academic'},
+    {'id': '4', 'subject': 'Security Alert: New Login', 'from_email': 'GitHub', 'priority': 'critical', 'to_field': '22dcs047@charusat.edu.in', 'cc_field': '', 'snippet': 'New sign-in detected...', 'body': 'We noticed a new sign-in to your GitHub account from a Windows device. If this wasn\'t you, secure your account immediately.', 'date': '2025-08-08', 'time': '16:45', 'email_type': 'security'},
+    {'id': '5', 'subject': 'Campus Newsletter', 'from_email': 'University', 'priority': 'low', 'to_field': 'all-students@charusat.edu.in', 'cc_field': '22dcs047@charusat.edu.in', 'snippet': 'Weekly campus updates...', 'body': 'This week\'s campus updates include information about upcoming cultural events and research opportunities.', 'date': '2025-08-08', 'time': '09:15', 'email_type': 'newsletter'}
+]
 
-class WebGmailAssistant:
-    def __init__(self):
-        self.gmail_service = None
-        self.user_email = "22dcs047@charusat.edu.in"
-        self.processing = False
-
-    def process_emails_for_web(self):
-        """Process emails and return data for web dashboard"""
-        global current_email_data
-        
-        current_email_data['is_processing'] = True
-        current_email_data['error_message'] = None
-        
-        try:
-            # Always use sample data for demo
-            all_emails = self.get_sample_emails()
-            
-            # Enhanced email categorization
-            direct_emails = []
-            cc_emails = []
-            
-            for email in all_emails:
-                user_email = self.user_email.lower()
-                to_field_lower = (email.to_field or "").lower()
-                cc_field_lower = (email.cc_field or "").lower()
-                
-                # Check if user email is in To field (direct email)
-                is_direct = (user_email in to_field_lower or 
-                           "22dcs047@charusat.edu.in" in to_field_lower)
-                
-                # Check if user email is in CC field
-                is_cc = (user_email in cc_field_lower or 
-                        "22dcs047@charusat.edu.in" in cc_field_lower)
-                
-                if is_direct:
-                    direct_emails.append(email)
-                elif is_cc:
-                    cc_emails.append(email)
-                else:
-                    # If neither direct nor CC, treat as direct (fallback)
-                    direct_emails.append(email)
-            
-            # Calculate statistics
-            priority_counts = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
-            type_counts = {}
-            
-            for email in all_emails:
-                priority_counts[email.priority] = priority_counts.get(email.priority, 0) + 1
-                type_counts[email.email_type] = type_counts.get(email.email_type, 0) + 1
-            
-            # Convert EmailData objects to dictionaries for JSON serialization
-            def email_to_dict(email):
-                return {
-                    'id': email.id,
-                    'from_email': email.from_email,
-                    'subject': email.subject,
-                    'body': email.body,
-                    'snippet': email.snippet,
-                    'date': email.date,
-                    'time': email.time,
-                    'to_field': email.to_field,
-                    'cc_field': email.cc_field,
-                    'priority': email.priority,
-                    'email_type': email.email_type
-                }
-            
-            current_email_data.update({
-                'all_emails': [email_to_dict(email) for email in all_emails],
-                'direct_emails': [email_to_dict(email) for email in direct_emails],
-                'cc_emails': [email_to_dict(email) for email in cc_emails],
-                'stats': {
-                    'total_unread': len(all_emails),
-                    'direct_count': len(direct_emails),
-                    'cc_count': len(cc_emails),
-                    'priority_counts': priority_counts,
-                    'type_counts': type_counts,
-                    'high_priority_count': priority_counts['critical'] + priority_counts['high']
-                },
-                'last_updated': datetime.now().isoformat(),
-                'is_processing': False,
-                'error_message': None,
-                'demo_mode': True
-            })
-            
-        except Exception as e:
-            current_email_data.update({
-                'is_processing': False,
-                'error_message': str(e)
-            })
-        
-        return current_email_data
-
-    def get_sample_emails(self):
-        """Generate sample email data for demo/development"""
-        sample_emails = [
-            EmailData(
-                id="1",
-                from_email='"Chess.com" <hello@chess.com>',
-                subject="It's a Chess Bot BBQ—Grab a Fork & Skewer!",
-                body="Hungry for a new chess challenge?",
-                snippet="Hungry for a new chess challenge? Join our latest tournament and test your skills against our advanced chess bots.",
-                date="2025-08-08",
-                time="08:30",
-                to_field="22dcs047@charusat.edu.in",
-                cc_field="",
-                priority="medium",
-                email_type="general"
-            ),
-            EmailData(
-                id="2",
-                from_email="Medium Daily Digest <noreply@medium.com>",
-                subject="10 Python Libraries So Reliable, I Stopped Debugging My Scripts",
-                body="JAI MEHTANI Stories for JAI MEHTANI",
-                snippet="JAI MEHTANI Stories for JAI MEHTANI - Today's highlights in tech and programming.",
-                date="2025-08-08",
-                time="07:00",
-                to_field="22dcs047@charusat.edu.in",
-                cc_field="",
-                priority="medium",
-                email_type="general"
-            ),
-            EmailData(
-                id="3",
-                from_email="Kaggle <no-reply@kaggle.com>",
-                subject="Competition Launch: Open Model Red-Teaming Challenge",
-                body="Hi Jai Mehtani, Join the red-teaming challenge",
-                snippet="Hi Jai Mehtani, Join the red-teaming challenge and discover new vulnerabilities in a newly released model.",
-                date="2025-08-07",
-                time="19:29",
-                to_field="22dcs047@charusat.edu.in",
-                cc_field="",
-                priority="high",
-                email_type="academic"
-            ),
-            EmailData(
-                id="4",
-                from_email="Professor Smith <prof.smith@charusat.edu.in>",
-                subject="Important: Assignment Deadline Extended",
-                body="The deadline has been extended",
-                snippet="The deadline for the final project has been extended to next Friday due to technical issues.",
-                date="2025-08-08",
-                time="14:30",
-                to_field="class2024@charusat.edu.in",
-                cc_field="22dcs047@charusat.edu.in, other.student@charusat.edu.in",
-                priority="high",
-                email_type="academic"
-            )
-        ]
-        
-        return sample_emails
-
-# Initialize the web assistant
-web_assistant = WebGmailAssistant()
+def get_stats():
+    direct = [e for e in emails if '22dcs047@charusat.edu.in' in e['to_field']]
+    cc = [e for e in emails if '22dcs047@charusat.edu.in' in e['cc_field']]
+    high_priority = [e for e in emails if e['priority'] in ['high', 'critical']]
+    
+    return {
+        'all_emails': emails,
+        'direct_emails': direct,
+        'cc_emails': cc,
+        'stats': {
+            'total_unread': len(emails),
+            'direct_count': len(direct),
+            'cc_count': len(cc),
+            'high_priority_count': len(high_priority),
+            'priority_counts': {'critical': len([e for e in emails if e['priority'] == 'critical']), 'high': len([e for e in emails if e['priority'] == 'high']), 'medium': len([e for e in emails if e['priority'] == 'medium']), 'low': len([e for e in emails if e['priority'] == 'low'])}
+        },
+        'last_updated': datetime.now().isoformat(),
+        'demo_mode': True
+    }
 
 @app.route('/')
-def welcome():
-    """Welcome page for new users"""
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Smart Gmail Assistant</title>
-        <style>
-            body { font-family: Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin: 0; padding: 40px; color: white; }
-            .container { max-width: 800px; margin: 0 auto; text-align: center; }
-            .hero { background: rgba(255,255,255,0.1); padding: 60px 40px; border-radius: 20px; backdrop-filter: blur(10px); }
-            .btn { background: white; color: #667eea; padding: 15px 30px; border: none; border-radius: 10px; font-size: 1.1rem; font-weight: 600; text-decoration: none; display: inline-block; margin: 10px; }
-            .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="hero">
-                <h1>📧 Smart Gmail Assistant</h1>
-                <p>Transform your email chaos into organized productivity</p>
-                <a href="/dashboard" class="btn">🚀 Try Dashboard</a>
-                <a href="/debug" class="btn">🔍 Debug View</a>
-            </div>
+def home():
+    return '''<!DOCTYPE html>
+<html>
+<head>
+    <title>Smart Gmail Assistant</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: white; }
+        .container { max-width: 1000px; margin: 0 auto; padding: 40px 20px; }
+        .hero { background: rgba(255,255,255,0.15); padding: 80px 40px; border-radius: 25px; backdrop-filter: blur(20px); text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.1); }
+        .hero h1 { font-size: 3.5rem; margin-bottom: 20px; font-weight: 700; }
+        .hero p { font-size: 1.3rem; margin-bottom: 40px; opacity: 0.9; }
+        .btn { background: white; color: #667eea; padding: 18px 35px; border: none; border-radius: 50px; font-size: 1.1rem; font-weight: 600; text-decoration: none; display: inline-block; margin: 10px 15px; transition: all 0.3s ease; box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
+        .btn:hover { transform: translateY(-3px); box-shadow: 0 12px 35px rgba(0,0,0,0.2); color: #5a67d8; }
+        .demo-badge { background: linear-gradient(45deg, #ffd700, #ffed4e); color: #333; padding: 12px 25px; border-radius: 50px; font-weight: 600; margin-bottom: 30px; display: inline-block; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="hero">
+            <div class="demo-badge"><i class="fas fa-star"></i> LIVE DEMO <i class="fas fa-star"></i></div>
+            <h1><i class="fas fa-envelope-open-text"></i> Smart Gmail Assistant</h1>
+            <p>AI-powered email management dashboard</p>
+            <a href="/dashboard" class="btn"><i class="fas fa-rocket"></i> Launch Dashboard</a>
+            <a href="/debug" class="btn" style="background: rgba(255,255,255,0.2); color: white;"><i class="fas fa-code"></i> Debug View</a>
         </div>
-    </body>
-    </html>
-    """
+    </div>
+</body>
+</html>'''
 
 @app.route('/dashboard')
 def dashboard():
-    """Main dashboard page"""
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Gmail Assistant Dashboard</title>
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: Arial, sans-serif; background: #f5f7fa; }
-            .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 15px; margin-bottom: 30px; }
-            .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
-            .stat-card { background: white; padding: 25px; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); text-align: center; }
-            .email-section { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
-            .email-item { background: #f8f9fb; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #ddd; }
-            .priority-high { border-left-color: #e74c3c; }
-            .priority-critical { border-left-color: #c0392b; }
-            .priority-medium { border-left-color: #f39c12; }
-            .priority-low { border-left-color: #27ae60; }
-            .btn { background: #667eea; color: white; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; margin: 10px 5px; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <header class="header">
-                <h1>📧 Smart Gmail Assistant Dashboard</h1>
-                <p>Intelligent email management for Jai Mehtani (22dcs047@charusat.edu.in)</p>
-                <button class="btn" onclick="loadEmails()">🔄 Refresh</button>
-            </header>
+    return '''<!DOCTYPE html>
+<html>
+<head>
+    <title>Gmail Assistant Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); min-height: 100vh; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 20px; margin-bottom: 30px; box-shadow: 0 15px 35px rgba(102, 126, 234, 0.2); }
+        .header h1 { font-size: 2.2rem; margin-bottom: 8px; }
+        .header p { opacity: 0.9; font-size: 1.1rem; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 25px; margin-bottom: 30px; }
+        .stat-card { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); text-align: center; transition: transform 0.3s ease; position: relative; }
+        .stat-card:hover { transform: translateY(-5px); }
+        .stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #667eea, #764ba2); }
+        .stat-card h3 { font-size: 2.5rem; color: #2c3e50; margin-bottom: 10px; }
+        .stat-card p { color: #7f8c8d; font-size: 1.1rem; font-weight: 500; }
+        .action-bar { background: white; padding: 25px; border-radius: 20px; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; }
+        .action-btn { padding: 15px 30px; border: none; border-radius: 50px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; font-size: 1rem; }
+        .action-btn.primary { background: #4CAF50; color: white; }
+        .action-btn.secondary { background: #f8f9fa; color: #495057; border: 1px solid #dee2e6; }
+        .action-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
+        .email-section { background: white; border-radius: 20px; padding: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        .tab-container { display: flex; gap: 5px; margin-bottom: 25px; }
+        .tab-btn { padding: 15px 25px; border: none; background: #f8f9fa; border-radius: 50px; cursor: pointer; font-weight: 600; transition: all 0.3s ease; }
+        .tab-btn.active { background: #667eea; color: white; }
+        .email-item { background: #f8f9fb; padding: 20px; margin: 15px 0; border-radius: 15px; border-left: 5px solid #ddd; transition: all 0.3s ease; cursor: pointer; }
+        .email-item:hover { transform: translateX(5px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
+        .email-item.priority-critical { border-left-color: #dc3545; }
+        .email-item.priority-high { border-left-color: #fd7e14; }
+        .email-item.priority-medium { border-left-color: #ffc107; }
+        .email-item.priority-low { border-left-color: #28a745; }
+        .priority-badge { padding: 6px 12px; border-radius: 20px; color: white; font-size: 0.85rem; font-weight: 600; }
+        .priority-critical .priority-badge { background: #dc3545; }
+        .priority-high .priority-badge { background: #fd7e14; }
+        .priority-medium .priority-badge { background: #ffc107; color: #333; }
+        .priority-low .priority-badge { background: #28a745; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal-content { background: white; margin: 5% auto; padding: 0; border-radius: 20px; width: 90%; max-width: 800px; box-shadow: 0 25px 50px rgba(0,0,0,0.3); }
+        .modal-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; display: flex; justify-content: space-between; align-items: center; }
+        .modal-body { padding: 30px; }
+        .modal-close { background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1><i class="fas fa-envelope-open-text"></i> Smart Gmail Assistant</h1>
+            <p>Intelligent email management for Jai Mehtani (22dcs047@charusat.edu.in)</p>
+        </header>
 
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <h3 id="totalEmails">Loading...</h3>
-                    <p>Total Unread</p>
-                </div>
-                <div class="stat-card">
-                    <h3 id="directEmails">Loading...</h3>
-                    <p>Direct Emails</p>
-                </div>
-                <div class="stat-card">
-                    <h3 id="highPriority">Loading...</h3>
-                    <p>High Priority</p>
-                </div>
-                <div class="stat-card">
-                    <h3 id="ccEmails">Loading...</h3>
-                    <p>CC'd Emails</p>
-                </div>
-            </div>
-
-            <section class="email-section">
-                <h2>📧 Recent Emails</h2>
-                <div id="emailList">Loading emails...</div>
-            </section>
+        <div class="stats-grid">
+            <div class="stat-card"><h3 id="totalEmails">0</h3><p><i class="fas fa-inbox"></i> Total Unread</p></div>
+            <div class="stat-card"><h3 id="directEmails">0</h3><p><i class="fas fa-at"></i> Direct Emails</p></div>
+            <div class="stat-card"><h3 id="highPriority">0</h3><p><i class="fas fa-exclamation-triangle"></i> High Priority</p></div>
+            <div class="stat-card"><h3 id="ccEmails">0</h3><p><i class="fas fa-share-alt"></i> CC'd Emails</p></div>
         </div>
 
-        <script>
-            async function loadEmails() {
-                try {
-                    const response = await fetch('/api/emails');
-                    const data = await response.json();
-                    
-                    document.getElementById('totalEmails').textContent = data.stats.total_unread || 0;
-                    document.getElementById('directEmails').textContent = data.stats.direct_count || 0;
-                    document.getElementById('highPriority').textContent = data.stats.high_priority_count || 0;
-                    document.getElementById('ccEmails').textContent = data.stats.cc_count || 0;
-                    
-                    const emailList = document.getElementById('emailList');
-                    let html = '';
-                    
-                    if (data.direct_emails && data.direct_emails.length > 0) {
-                        data.direct_emails.forEach(email => {
-                            html += `
-                                <div class="email-item priority-${email.priority}">
-                                    <h4>${email.subject}</h4>
-                                    <p style="color: #666;">${email.from_email}</p>
-                                    <p>${email.snippet}</p>
-                                    <small>${email.date} ${email.time} - Priority: ${email.priority.toUpperCase()}</small>
-                                </div>
-                            `;
-                        });
-                    } else {
-                        html = '<p>No emails found</p>';
-                    }
-                    
-                    emailList.innerHTML = html;
-                } catch (error) {
-                    document.getElementById('emailList').innerHTML = '<p style="color: red;">Error loading emails: ' + error.message + '</p>';
-                }
-            }
-            
-            loadEmails();
-        </script>
-    </body>
-    </html>
-    """
+        <div class="action-bar">
+            <div>
+                <button class="action-btn primary" onclick="createDrafts()"><i class="fas fa-edit"></i> Create Auto-Reply Drafts</button>
+                <button class="action-btn secondary" onclick="exportEmails()"><i class="fas fa-download"></i> Export Summary</button>
+                <button class="action-btn secondary" onclick="window.location.href='/debug'"><i class="fas fa-bug"></i> Debug View</button>
+            </div>
+            <div style="color: #6c757d;"><i class="fas fa-clock"></i> Last updated: <span id="lastUpdated">Never</span></div>
+        </div>
 
-@app.route('/debug')
-def debug_page():
-    """Debug page to see raw email data"""
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Debug - Gmail Assistant</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-            .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
-            pre { background: #f5f5f5; padding: 15px; border-radius: 4px; overflow: auto; }
-            .btn { background: #1a73e8; color: white; padding: 10px 20px; border: none; border-radius: 4px; margin: 5px; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🔍 Gmail Assistant Debug</h1>
-            <button class="btn" onclick="loadDebugInfo()">Refresh Debug Info</button>
-        <button class="btn" onclick="window.location.href='/'">Back to Home</button>
-        
-        <h3>📊 Debug Information</h3>
-        <pre id="debugInfo">Loading...</pre>
+        <section class="email-section">
+            <h2><i class="fas fa-envelope"></i> Email Management</h2>
+            <div class="tab-container">
+                <button class="tab-btn active" onclick="showTab('direct')"><i class="fas fa-inbox"></i> Direct Emails (<span id="directCount">0</span>)</button>
+                <button class="tab-btn" onclick="showTab('cc')"><i class="fas fa-share-alt"></i> CC'd Emails (<span id="ccCount">0</span>)</button>
+            </div>
+            <div id="directTab"><p>Loading emails...</p></div>
+            <div id="ccTab" style="display: none;"><p>Loading CC'd emails...</p></div>
+        </section>
+    </div>
+
+    <div id="emailModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header"><h3 id="modalTitle">Email Details</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+            <div class="modal-body" id="modalBody"></div>
+        </div>
     </div>
 
     <script>
-        async function loadDebugInfo() {
+        let emailData = {};
+        
+        async function loadEmails() {
+            try {
+                const response = await fetch('/api/emails');
+                const data = await response.json();
+                emailData = data;
+                
+                document.getElementById('totalEmails').textContent = data.stats.total_unread;
+                document.getElementById('directEmails').textContent = data.stats.direct_count;
+                document.getElementById('highPriority').textContent = data.stats.high_priority_count;
+                document.getElementById('ccEmails').textContent = data.stats.cc_count;
+                document.getElementById('directCount').textContent = data.stats.direct_count;
+                document.getElementById('ccCount').textContent = data.stats.cc_count;
+                
+                updateEmailList('directTab', data.direct_emails);
+                updateEmailList('ccTab', data.cc_emails);
+                
+                document.getElementById('lastUpdated').textContent = new Date(data.last_updated).toLocaleString();
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+        
+        function updateEmailList(tabId, emails) {
+            const tab = document.getElementById(tabId);
+            if (emails.length === 0) {
+                tab.innerHTML = '<p style="text-align: center; padding: 40px; color: #666;">No emails found</p>';
+                return;
+            }
+            
+            let html = '';
+            emails.forEach(email => {
+                const icon = {'critical': '🚨', 'high': '🔴', 'medium': '🟡', 'low': '🟢'}[email.priority] || '⚪';
+                html += `
+                    <div class="email-item priority-${email.priority}" onclick="openModal('${email.id}')">
+                        <div style="display: flex; justify-content: space-between; align-items: start;">
+                            <div style="flex: 1;">
+                                <h4 style="margin-bottom: 8px;">${email.subject}</h4>
+                                <p style="color: #666; font-size: 0.9rem; margin-bottom: 8px;">${email.from_email}</p>
+                                <p style="margin-bottom: 10px;">${email.snippet}</p>
+                                <small style="color: #888;">${email.date} ${email.time}</small>
+                            </div>
+                            <div class="priority-badge">${icon} ${email.priority.toUpperCase()}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            tab.innerHTML = html;
+        }
+        
+        function showTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('directTab').style.display = tab === 'direct' ? 'block' : 'none';
+            document.getElementById('ccTab').style.display = tab === 'cc' ? 'block' : 'none';
+        }
+        
+        function openModal(emailId) {
+            const allEmails = [...emailData.direct_emails, ...emailData.cc_emails];
+            const email = allEmails.find(e => e.id === emailId);
+            if (!email) return;
+            
+            document.getElementById('modalTitle').textContent = email.subject;
+            document.getElementById('modalBody').innerHTML = `
+                <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
+                    <p><strong>From:</strong> ${email.from_email}</p>
+                    <p><strong>To:</strong> ${email.to_field}</p>
+                    <p><strong>CC:</strong> ${email.cc_field || 'None'}</p>
+                    <p><strong>Date:</strong> ${email.date} ${email.time}</p>
+                    <p><strong>Priority:</strong> ${email.priority.toUpperCase()}</p>
+                </div>
+                <div>
+                    <h4>Content:</h4>
+                    <div style="background: white; border: 1px solid #ddd; border-radius: 8px; padding: 15px; margin-top: 10px;">
+                        ${email.body}
+                    </div>
+                </div>
+            `;
+            document.getElementById('emailModal').style.display = 'block';
+        }
+        
+        function closeModal() {
+            document.getElementById('emailModal').style.display = 'none';
+        }
+        
+        async function createDrafts() {
+            try {
+                const response = await fetch('/api/create-drafts', { method: 'POST' });
+                const result = await response.json();
+                alert(`Found ${result.high_priority_emails} high-priority emails. ${result.message}`);
+            } catch (error) {
+                alert('Error creating drafts');
+            }
+        }
+        
+        function exportEmails() {
+            const data = JSON.stringify(emailData, null, 2);
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `gmail-export-${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            alert('Email data exported successfully!');
+        }
+        
+        window.onclick = function(event) {
+            if (event.target.id === 'emailModal') closeModal();
+        }
+        
+        loadEmails();
+        setInterval(loadEmails, 60000);
+    </script>
+</body>
+</html>'''
+
+@app.route('/debug')
+def debug():
+    return '''<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug - Gmail Assistant</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        pre { background: #f5f5f5; padding: 15px; border-radius: 4px; overflow: auto; }
+        .btn { background: #1a73e8; color: white; padding: 10px 20px; border: none; border-radius: 4px; margin: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Gmail Assistant Debug</h1>
+        <button class="btn" onclick="loadDebug()">Refresh</button>
+        <button class="btn" onclick="window.location.href='/'">Home</button>
+        <h3>Debug Information</h3>
+        <pre id="debugInfo">Loading...</pre>
+    </div>
+    <script>
+        async function loadDebug() {
             try {
                 const response = await fetch('/api/debug');
                 const data = await response.json();
@@ -355,143 +305,32 @@ def debug_page():
                 document.getElementById('debugInfo').textContent = 'Error: ' + error.message;
             }
         }
-        loadDebugInfo();
+        loadDebug();
     </script>
 </body>
 </html>'''
 
 @app.route('/api/emails')
-def get_emails():
-    return categorize_emails()
+def api_emails():
+    return jsonify(get_stats())
 
 @app.route('/api/refresh', methods=['POST'])
-def refresh_emails():
-    return {'status': 'success'}
+def api_refresh():
+    return jsonify({'status': 'success'})
 
 @app.route('/api/create-drafts', methods=['POST'])
-def create_drafts():
-    data = categorize_emails()
-    high_priority = [email for email in data['direct_emails'] if email['priority'] in ['high', 'critical']]
-    return {
+def api_create_drafts():
+    data = get_stats()
+    high_priority = [e for e in data['direct_emails'] if e['priority'] in ['high', 'critical']]
+    return jsonify({
         'status': 'success',
-        'drafts_created': 0,
         'high_priority_emails': len(high_priority),
         'message': f'Found {len(high_priority)} high-priority emails (Demo mode)'
-    }
+    })
 
 @app.route('/api/debug')
-def debug_info():
-    data = categorize_emails()
-    return {
-        'total_emails': data['stats']['total_unread'],
-        'direct_emails': data['stats']['direct_count'],
-        'cc_emails': data['stats']['cc_count'],
-        'stats': data['stats'],
-        'last_updated': data['last_updated'],
-        'demo_mode': True,
-        'sample_emails': data['all_emails'][:3]
-    }
-
-if __name__ == '__main__':
-    app.run(debug=True)">Refresh Debug Info</button>
-            <button class="btn" onclick="window.location.href='/'">Back to Home</button>
-            
-            <h3>📊 Debug Information</h3>
-            <pre id="debugInfo">Loading...</pre>
-        </div>
-
-        <script>
-            async function loadDebugInfo() {
-                try {
-                    const response = await fetch('/api/debug');
-                    const data = await response.json();
-                    document.getElementById('debugInfo').textContent = JSON.stringify(data, null, 2);
-                } catch (error) {
-                    document.getElementById('debugInfo').textContent = 'Error: ' + error.message;
-                }
-            }
-            
-        </script>
-    </body>
-    </html>
-    """
-
-@app.route('/api/emails')
-def get_emails():
-    return jsonify(current_email_data)
-
-@app.route('/api/refresh', methods=['POST'])
-def refresh_emails():
-    web_assistant.process_emails_for_web()
-    return jsonify({'status': 'success'})
-
-@app.route('/api/create-drafts', methods=['POST'])
-def create_drafts():
-    try:
-        high_priority_emails = []
-        for email_dict in current_email_data.get('direct_emails', []):
-            if email_dict.get('priority') in ['high', 'critical']:
-                high_priority_emails.append(email_dict)
-        
-        return jsonify({
-            'status': 'success',
-            'drafts_created': 0,
-            'high_priority_emails': len(high_priority_emails),
-            'message': f'Found {len(high_priority_emails)} high-priority emails (Demo mode - drafts not actually created)'
-        })
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)})
-
-@app.route('/api/debug')
-def debug_info():
-    debug_data = {
-        'total_emails': len(current_email_data.get('all_emails', [])),
-        'direct_emails': len(current_email_data.get('direct_emails', [])),
-        'cc_emails': len(current_email_data.get('cc_emails', [])),
-        'stats': current_email_data.get('stats', {}),
-        'last_updated': current_email_data.get('last_updated'),
-        'demo_mode': current_email_data.get('demo_mode', True),
-        'sample_emails': current_email_data.get('all_emails', [])[:3]
-    }
-    return jsonify(debug_data)
-
-# Initialize data on startup
-web_assistant.process_emails_for_web()
-
-if __name__ == '__main__':
-    app.run(debug=True)
-        </script>
-    </body>
-    </html>
-    """
-
-@app.route('/api/emails')
-def get_emails():
-    """API endpoint to get current email data"""
-    return jsonify(current_email_data)
-
-@app.route('/api/refresh', methods=['POST'])
-def refresh_emails():
-    """API endpoint to refresh email data"""
-    web_assistant.process_emails_for_web()
-    return jsonify({'status': 'success'})
-
-@app.route('/api/debug')
-def debug_info():
-    """Debug endpoint to see raw email data"""
-    debug_data = {
-        'total_emails': len(current_email_data.get('all_emails', [])),
-        'direct_emails': len(current_email_data.get('direct_emails', [])),
-        'cc_emails': len(current_email_data.get('cc_emails', [])),
-        'stats': current_email_data.get('stats', {}),
-        'last_updated': current_email_data.get('last_updated'),
-        'demo_mode': current_email_data.get('demo_mode', True),
-        'sample_emails': current_email_data.get('all_emails', [])[:3]  # First 3 emails
-    }
-    return jsonify(debug_data)
-
-# Initialize data on startup
-web_assistant.process_emails_for_web()
+def api_debug():
+    return jsonify(get_stats())
 
 if __name__ == '__main__':
     app.run(debug=True)
