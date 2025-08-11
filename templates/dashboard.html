@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Smart Gmail Assistant Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; background: #f5f7fa; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 15px; margin-bottom: 30px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .stat-card { background: white; padding: 25px; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+        .email-section { background: white; border-radius: 15px; padding: 25px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+        .email-item { background: #f8f9fb; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #ddd; }
+        .priority-high { border-left-color: #e74c3c; }
+        .priority-critical { border-left-color: #c0392b; }
+        .priority-medium { border-left-color: #f39c12; }
+        .priority-low { border-left-color: #27ae60; }
+        .btn { background: #667eea; color: white; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; margin: 10px 5px; }
+        .btn:hover { background: #5a67d8; }
+        .tab-buttons { margin-bottom: 20px; }
+        .tab-btn { background: #f8f9fa; border: 1px solid #dee2e6; padding: 10px 20px; margin-right: 5px; cursor: pointer; border-radius: 5px; }
+        .tab-btn.active { background: #667eea; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>📧 Smart Gmail Assistant Dashboard</h1>
+            <p>Intelligent email management for Jai Mehtani (22dcs047@charusat.edu.in)</p>
+            <button class="btn" onclick="refreshEmails()">🔄 Refresh Emails</button>
+            <button class="btn" onclick="createDrafts()">✍️ Create Auto-Reply Drafts</button>
+        </header>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3 id="totalEmails">0</h3>
+                <p>Total Unread Emails</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="directEmails">0</h3>
+                <p>Direct Emails</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="highPriority">0</h3>
+                <p>High Priority</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="ccEmails">0</h3>
+                <p>CC'd Emails</p>
+            </div>
+        </div>
+
+        <section class="email-section">
+            <h2>📧 Email Management</h2>
+            <div class="tab-buttons">
+                <button class="tab-btn active" onclick="showTab('direct')">Direct Emails</button>
+                <button class="tab-btn" onclick="showTab('cc')">CC'd Emails</button>
+            </div>
+            
+            <div id="directTab" class="email-tab">
+                <h3>Direct Emails</h3>
+                <div id="directEmailList">Loading...</div>
+            </div>
+            
+            <div id="ccTab" class="email-tab" style="display: none;">
+                <h3>CC'd Emails</h3>
+                <div id="ccEmailList">Loading...</div>
+            </div>
+        </section>
+
+        <div id="status" style="margin-top: 20px; padding: 15px; background: #e8f5e8; border-radius: 8px; display: none;"></div>
+    </div>
+
+    <script>
+        let currentTab = 'direct';
+        
+        async function loadEmails() {
+            try {
+                const response = await fetch('/api/emails');
+                const data = await response.json();
+                
+                // Update stats
+                document.getElementById('totalEmails').textContent = data.stats.total_unread || 0;
+                document.getElementById('directEmails').textContent = data.stats.direct_count || 0;
+                document.getElementById('highPriority').textContent = data.stats.high_priority_count || 0;
+                document.getElementById('ccEmails').textContent = data.stats.cc_count || 0;
+                
+                // Update email lists
+                updateEmailList('directEmailList', data.direct_emails || []);
+                updateEmailList('ccEmailList', data.cc_emails || []);
+                
+                // Update status
+                if (data.last_updated) {
+                    showStatus(`Last updated: ${new Date(data.last_updated).toLocaleString()}`, 'success');
+                }
+                
+            } catch (error) {
+                console.error('Error loading emails:', error);
+                showStatus('Error loading emails: ' + error.message, 'error');
+            }
+        }
+        
+        function updateEmailList(listId, emails) {
+            const listElement = document.getElementById(listId);
+            
+            if (emails.length === 0) {
+                listElement.innerHTML = '<p style="text-align: center; color: #666;">No emails found</p>';
+                return;
+            }
+            
+            let html = '';
+            emails.forEach(email => {
+                html += `
+                    <div class="email-item priority-${email.priority}">
+                        <div style="display: flex; justify-content: between; align-items: start;">
+                            <div style="flex: 1;">
+                                <h4>${email.subject}</h4>
+                                <p style="color: #666; margin: 5px 0;">${email.from_email}</p>
+                                <p style="margin: 5px 0;">${email.snippet}</p>
+                                <small style="color: #888;">${email.date} ${email.time}</small>
+                            </div>
+                            <div style="margin-left: 10px;">
+                                <span style="background: ${getPriorityColor(email.priority)}; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
+                                    ${email.priority.toUpperCase()}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            listElement.innerHTML = html;
+        }
+        
+        function getPriorityColor(priority) {
+            switch(priority) {
+                case 'critical': return '#c0392b';
+                case 'high': return '#e74c3c';
+                case 'medium': return '#f39c12';
+                case 'low': return '#27ae60';
+                default: return '#95a5a6';
+            }
+        }
+        
+        function showTab(tab) {
+            currentTab = tab;
+            
+            // Update tab buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Show/hide tab content
+            document.getElementById('directTab').style.display = tab === 'direct' ? 'block' : 'none';
+            document.getElementById('ccTab').style.display = tab === 'cc' ? 'block' : 'none';
+        }
+        
+        async function refreshEmails() {
+            showStatus('Refreshing emails...', 'info');
+            try {
+                const response = await fetch('/api/refresh', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.status === 'processing_started') {
+                    setTimeout(() => {
+                        loadEmails();
+                    }, 3000);
+                } else {
+                    loadEmails();
+                }
+            } catch (error) {
+                showStatus('Error refreshing emails: ' + error.message, 'error');
+            }
+        }
+        
+        async function createDrafts() {
+            showStatus('Creating auto-reply drafts...', 'info');
+            try {
+                const response = await fetch('/api/create-drafts', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    showStatus(`Found ${result.high_priority_emails} high-priority emails. ${result.message}`, 'success');
+                } else {
+                    showStatus('Error creating drafts: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showStatus('Error creating drafts: ' + error.message, 'error');
+            }
+        }
+        
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.style.display = 'block';
+            
+            // Set background color based on type
+            switch(type) {
+                case 'success': status.style.background = '#d4edda'; break;
+                case 'error': status.style.background = '#f8d7da'; break;
+                case 'info': status.style.background = '#d1ecf1'; break;
+            }
+            
+            // Hide after 5 seconds
+            setTimeout(() => {
+                status.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Load emails on page load
+        loadEmails();
+        
+        // Auto-refresh every 30 seconds
+        setInterval(loadEmails, 30000);
+    </script>
+</body>
+</html>

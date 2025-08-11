@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Gmail Assistant Debug</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        .debug-section { margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .debug-section h3 { margin-top: 0; color: #333; }
+        .email-item { background: #f9f9f9; padding: 10px; margin: 5px 0; border-radius: 4px; }
+        .priority-critical { border-left: 4px solid #d32f2f; }
+        .priority-high { border-left: 4px solid #f57c00; }
+        .priority-medium { border-left: 4px solid #fbc02d; }
+        .priority-low { border-left: 4px solid #388e3c; }
+        .btn { background: #1a73e8; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+        .btn:hover { background: #1557b0; }
+        pre { background: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📧 Gmail Assistant Debug Dashboard</h1>
+        
+        <div class="debug-section">
+            <h3>🔄 Actions</h3>
+            <button class="btn" onclick="refreshData()">Refresh Email Data</button>
+            <button class="btn" onclick="loadDebugInfo()">Load Debug Info</button>
+            <button class="btn" onclick="window.location.href='/'">Back to Welcome</button>
+            <button class="btn" onclick="window.location.href='/dashboard'">Main Dashboard</button>
+        </div>
+
+        <div class="debug-section">
+            <h3>📊 Current Statistics</h3>
+            <div id="stats">Loading...</div>
+        </div>
+
+        <div class="debug-section">
+            <h3>📧 Sample Emails</h3>
+            <div id="emails">Loading...</div>
+        </div>
+
+        <div class="debug-section">
+            <h3>🔍 Raw Debug Data</h3>
+            <pre id="rawData">Loading...</pre>
+        </div>
+    </div>
+
+    <script>
+        async function loadDebugInfo() {
+            try {
+                const response = await fetch('/api/debug');
+                const data = await response.json();
+                
+                // Update stats
+                document.getElementById('stats').innerHTML = `
+                    <p><strong>Total Emails:</strong> ${data.total_emails}</p>
+                    <p><strong>Direct Emails:</strong> ${data.direct_emails}</p>
+                    <p><strong>CC'd Emails:</strong> ${data.cc_emails}</p>
+                    <p><strong>Last Updated:</strong> ${data.last_updated || 'Never'}</p>
+                    <p><strong>Processing:</strong> ${data.is_processing ? 'Yes' : 'No'}</p>
+                    <p><strong>Demo Mode:</strong> ${data.demo_mode ? 'Yes' : 'No'}</p>
+                    ${data.error_message ? `<p style="color: red;"><strong>Error:</strong> ${data.error_message}</p>` : ''}
+                    <h4>Priority Breakdown:</h4>
+                    <ul>
+                        <li>Critical: ${data.stats.priority_counts?.critical || 0}</li>
+                        <li>High: ${data.stats.priority_counts?.high || 0}</li>
+                        <li>Medium: ${data.stats.priority_counts?.medium || 0}</li>
+                        <li>Low: ${data.stats.priority_counts?.low || 0}</li>
+                    </ul>
+                `;
+                
+                // Update emails
+                if (data.sample_emails) {
+                    let emailsHtml = '<h4>Sample Emails:</h4>';
+                    data.sample_emails.forEach(email => {
+                        emailsHtml += `
+                            <div class="email-item priority-${email.priority}">
+                                <strong>[${email.priority.toUpperCase()}]</strong> ${email.subject}<br>
+                                <small>From: ${email.from_email}</small><br>
+                                <small>To: ${email.to_field || 'N/A'}</small><br>
+                                <small>CC: ${email.cc_field || 'N/A'}</small>
+                            </div>
+                        `;
+                    });
+                    document.getElementById('emails').innerHTML = emailsHtml;
+                }
+                
+                // Update raw data
+                document.getElementById('rawData').textContent = JSON.stringify(data, null, 2);
+                
+            } catch (error) {
+                console.error('Error loading debug info:', error);
+                document.getElementById('stats').innerHTML = '<p style="color: red;">Error loading debug info: ' + error.message + '</p>';
+            }
+        }
+
+        async function refreshData() {
+            try {
+                document.getElementById('stats').innerHTML = '<p>🔄 Refreshing data...</p>';
+                
+                const response = await fetch('/api/refresh', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.status === 'processing_started') {
+                    setTimeout(() => {
+                        loadDebugInfo();
+                    }, 3000);
+                }
+                
+            } catch (error) {
+                console.error('Error refreshing data:', error);
+                document.getElementById('stats').innerHTML = '<p style="color: red;">Error refreshing data: ' + error.message + '</p>';
+            }
+        }
+
+        // Load initial data
+        loadDebugInfo();
+        
+        // Auto-refresh every 10 seconds
+        setInterval(loadDebugInfo, 10000);
+    </script>
+</body>
+</html>
