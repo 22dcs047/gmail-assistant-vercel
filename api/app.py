@@ -1,18 +1,86 @@
 from flask import Flask, jsonify
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# Sample data
-emails = [
-    {'id': '1', 'subject': 'Chess Tournament Invitation', 'from_email': 'Chess.com', 'priority': 'medium', 'to_field': '22dcs047@charusat.edu.in', 'cc_field': '', 'snippet': 'Join our chess tournament...', 'body': 'Hungry for a new chess challenge? Join our latest tournament and test your skills against our advanced chess bots.', 'date': '2025-08-08', 'time': '08:30', 'email_type': 'general'},
-    {'id': '2', 'subject': 'Kaggle Competition: AI Red Team Challenge', 'from_email': 'Kaggle', 'priority': 'high', 'to_field': '22dcs047@charusat.edu.in', 'cc_field': '', 'snippet': 'Join the red-teaming challenge...', 'body': 'Hi Jai Mehtani, Join the red-teaming challenge and discover new vulnerabilities in a newly released model. Prize pool of $50,000!', 'date': '2025-08-07', 'time': '19:29', 'email_type': 'academic'},
-    {'id': '3', 'subject': 'Assignment Deadline Extended', 'from_email': 'Professor Smith', 'priority': 'high', 'to_field': 'class2024@charusat.edu.in', 'cc_field': '22dcs047@charusat.edu.in', 'snippet': 'Deadline extended to Friday...', 'body': 'Dear Students, The deadline for the final project has been extended to next Friday due to technical issues.', 'date': '2025-08-08', 'time': '14:30', 'email_type': 'academic'},
-    {'id': '4', 'subject': 'Security Alert: New Login', 'from_email': 'GitHub', 'priority': 'critical', 'to_field': '22dcs047@charusat.edu.in', 'cc_field': '', 'snippet': 'New sign-in detected...', 'body': 'We noticed a new sign-in to your GitHub account from a Windows device. If this wasn\'t you, secure your account immediately.', 'date': '2025-08-08', 'time': '16:45', 'email_type': 'security'},
-    {'id': '5', 'subject': 'Campus Newsletter', 'from_email': 'University', 'priority': 'low', 'to_field': 'all-students@charusat.edu.in', 'cc_field': '22dcs047@charusat.edu.in', 'snippet': 'Weekly campus updates...', 'body': 'This week\'s campus updates include information about upcoming cultural events and research opportunities.', 'date': '2025-08-08', 'time': '09:15', 'email_type': 'newsletter'}
-]
+# Sample data with TODAY'S dates
+def get_current_emails():
+    """Get emails with current dates for last 24 hours"""
+    now = datetime.now()
+    today = now.strftime('%Y-%m-%d')
+    
+    # Create emails with times from last 24 hours
+    emails = [
+        {
+            'id': '1', 
+            'subject': 'Chess Tournament Invitation - Join Today!', 
+            'from_email': 'Chess.com <hello@chess.com>', 
+            'priority': 'medium', 
+            'to_field': '22dcs047@charusat.edu.in', 
+            'cc_field': '', 
+            'snippet': 'Hungry for a new chess challenge? Join our latest tournament...', 
+            'body': 'Hungry for a new chess challenge? Join our latest tournament and test your skills against our advanced chess bots. This event features multiple difficulty levels and exciting prizes for winners.', 
+            'date': today, 
+            'time': (now - timedelta(hours=2)).strftime('%H:%M'), 
+            'email_type': 'general'
+        },
+        {
+            'id': '2', 
+            'subject': 'URGENT: Kaggle Competition Deadline in 6 Hours!', 
+            'from_email': 'Kaggle <no-reply@kaggle.com>', 
+            'priority': 'high', 
+            'to_field': '22dcs047@charusat.edu.in', 
+            'cc_field': '', 
+            'snippet': 'Hi Jai Mehtani, Your submission deadline is approaching fast...', 
+            'body': 'Hi Jai Mehtani, Your submission for the AI Red-Teaming Challenge is due in 6 hours. Don\'t miss out on the $50,000 prize pool! Submit your solution now.', 
+            'date': today, 
+            'time': (now - timedelta(hours=1)).strftime('%H:%M'), 
+            'email_type': 'academic'
+        },
+        {
+            'id': '3', 
+            'subject': 'URGENT: Assignment Submission Due Tomorrow', 
+            'from_email': 'Professor Smith <prof.smith@charusat.edu.in>', 
+            'priority': 'high', 
+            'to_field': 'class2024@charusat.edu.in', 
+            'cc_field': '22dcs047@charusat.edu.in', 
+            'snippet': 'Reminder: Final project submission deadline is tomorrow...', 
+            'body': 'Dear Students, This is a reminder that your final project submission is due tomorrow at 11:59 PM. Please ensure all requirements are met and submit through the portal.', 
+            'date': today, 
+            'time': (now - timedelta(minutes=45)).strftime('%H:%M'), 
+            'email_type': 'academic'
+        },
+        {
+            'id': '4', 
+            'subject': 'CRITICAL: Suspicious Login Attempt Detected', 
+            'from_email': 'GitHub Security <noreply@github.com>', 
+            'priority': 'critical', 
+            'to_field': '22dcs047@charusat.edu.in', 
+            'cc_field': '', 
+            'snippet': 'We detected a suspicious login attempt to your account...', 
+            'body': 'We detected a suspicious login attempt to your GitHub account from an unrecognized device in a different location. Please secure your account immediately by changing your password.', 
+            'date': today, 
+            'time': (now - timedelta(minutes=15)).strftime('%H:%M'), 
+            'email_type': 'security'
+        },
+        {
+            'id': '5', 
+            'subject': 'Weekly Campus Updates - New Events This Week', 
+            'from_email': 'University Newsletter <newsletter@charusat.edu.in>', 
+            'priority': 'low', 
+            'to_field': 'all-students@charusat.edu.in', 
+            'cc_field': '22dcs047@charusat.edu.in', 
+            'snippet': 'This week\'s campus updates include exciting new events...', 
+            'body': 'This week\'s campus updates include exciting new cultural events, library schedule changes, and amazing research opportunities. Check out the career fair next week!', 
+            'date': (now - timedelta(hours=3)).strftime('%Y-%m-%d'), 
+            'time': (now - timedelta(hours=3)).strftime('%H:%M'), 
+            'email_type': 'newsletter'
+        }
+    ]
+    return emails
 
 def get_stats():
+    emails = get_current_emails()  # Get fresh emails with current dates
     direct = [e for e in emails if '22dcs047@charusat.edu.in' in e['to_field']]
     cc = [e for e in emails if '22dcs047@charusat.edu.in' in e['cc_field']]
     high_priority = [e for e in emails if e['priority'] in ['high', 'critical']]
@@ -29,7 +97,8 @@ def get_stats():
             'priority_counts': {'critical': len([e for e in emails if e['priority'] == 'critical']), 'high': len([e for e in emails if e['priority'] == 'high']), 'medium': len([e for e in emails if e['priority'] == 'medium']), 'low': len([e for e in emails if e['priority'] == 'low'])}
         },
         'last_updated': datetime.now().isoformat(),
-        'demo_mode': True
+        'demo_mode': True,
+        'data_source': 'Live demo with current timestamps'
     }
 
 @app.route('/')
