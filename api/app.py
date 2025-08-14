@@ -1,22 +1,370 @@
-# Simple AI Gmail Assistant for Vercel deployment
-from flask import Flask, jsonify
+# Real Gmail Assistant with AI Integration for Vercel deployment
+from flask import Flask, jsonify, request
 from datetime import datetime, timedelta
 import json
 import os
+import base64
+from email.mime.text import MIMEText
+import time
+
+# Import Gmail API libraries
+try:
+    from googleapiclient.discovery import build
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    GMAIL_AVAILABLE = True
+except ImportError:
+    GMAIL_AVAILABLE = False
+
+# Import OpenAI
+try:
+    import openai
+    from dotenv import load_dotenv
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
 
 app = Flask(__name__)
 
-# Simple assistant class without complex imports
-class SimpleGmailAssistant:
+# Load environment variables
+if OPENAI_AVAILABLE:
+    load_dotenv()
+
+class RealGmailAssistant:
     def __init__(self):
-        self.user_email = "22dcs047@charusat.edu.in"
-        # Check if OpenAI is available
-        self.openai_available = bool(os.getenv('OPENAI_API_KEY'))
-        print(f"🚀 Initializing Gmail Assistant")
+        self.user_email = os.getenv('GMAIL_USER_EMAIL', '22dcs047@charusat.edu.in')
+        self.scopes = ['https://www.googleapis.com/auth/gmail.readonly', 
+                      'https://www.googleapis.com/auth/gmail.compose',
+                      'https://www.googleapis.com/auth/gmail.modify']
+        
+        # Initialize OpenAI
+        self.openai_available = False
+        if OPENAI_AVAILABLE and os.getenv('OPENAI_API_KEY'):
+            try:
+                openai.api_key = os.getenv('OPENAI_API_KEY')
+                self.openai_available = True
+                print(f"🧠 OpenAI initialized successfully")
+            except Exception as e:
+                print(f"❌ OpenAI initialization failed: {e}")
+        
+        # Initialize Gmail
+        self.gmail_service = None
+        self.gmail_connected = False
+        if GMAIL_AVAILABLE:
+            self._initialize_gmail()
+        
+        print(f"🚀 Gmail Assistant initialized")
+        print(f"📧 Gmail Connected: {self.gmail_connected}")
         print(f"🧠 OpenAI Available: {self.openai_available}")
     
+    def _initialize_gmail(self):
+        """Initialize Gmail API connection"""
+        try:
+            creds = None
+            token_path = 'token.json'
+            credentials_path = 'credentials.json'
+            
+            # Try to load existing credentials
+            if os.path.exists(token_path):
+                try:
+                    creds = Credentials.from_authorized_user_file(token_path, self.scopes)
+                except Exception as e:
+                    print(f"❌ Error loading token: {e}")
+            
+            # If no valid credentials, try to refresh or create
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    try:
+                        creds.refresh(Request())
+                        # Save refreshed credentials
+                        with open(token_path, 'w') as token:
+                            token.write(creds.to_json())
+                        print("✅ Token refreshed successfully")
+                    except Exception as e:
+                        print(f"❌ Token refresh failed: {e}")
+                        return False
+                else:
+                    print("❌ No valid credentials found")
+                    return False
+            
+            # Build Gmail service
+            if creds and creds.valid:
+                self.gmail_service = build('gmail', 'v1', credentials=creds)
+                self.gmail_connected = True
+                print("✅ Gmail API connected successfully")
+                return True
+            else:
+                print("❌ No valid Gmail credentials")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Gmail initialization error: {e}")
+            return False
+    
+    def classify_email_with_ai(self, subject, body, sender):
+        """Use OpenAI to classify email priority and type"""
+        if not self.openai_available:
+            return self._classify_email_basic(subject, body, sender)
+        
+        try:
+            prompt = f"""Analyze this email and classify it:
+
+Subject: {subject}
+From: {sender}
+Content: {body[:500]}...
+
+Provide a JSON response with:
+1. priority: "critical", "high", "medium", or "low"
+2. email_type: "academic", "security", "personal", "promotional", "work", or "general"
+3. urgency_reason: brief explanation for the priority level
+
+Format as valid JSON only."""
+
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=200,
+                temperature=0.3
+            )
+            
+            result = json.loads(response.choices[0].message.content.strip())
+            result['ai_classified'] = True
+            return result
+            
+        except Exception as e:
+            print(f"❌ AI classification error: {e}")
+            return self._classify_email_basic(subject, body, sender)
+    
+    def _classify_email_basic(self, subject, body, sender):
+        """Basic rule-based email classification"""
+        subject_lower = subject.lower()
+        body_lower = body.lower()
+        
+        # Critical keywords
+        critical_keywords = ['urgent', 'critical', 'emergency', 'immediate', 'asap', 'deadline', 'expires', 'security alert']
+        high_keywords = ['important', 'reminder', 'due', 'meeting', 'interview', 'submission']
+        
+        priority = 'low'
+        if any(keyword in subject_lower or keyword in body_lower for keyword in critical_keywords):
+            priority = 'critical'
+        elif any(keyword in subject_lower or keyword in body_lower for keyword in high_keywords):
+            priority = 'high'
+        elif 'no-reply' not in sender.lower() and '@charusat.edu.in' in sender:
+            priority = 'medium'
+        
+        # Determine email type
+        email_type = 'general'
+        if '@charusat.edu.in' in sender or 'professor' in sender.lower() or 'academic' in subject_lower:
+            email_type = 'academic'
+        elif 'security' in subject_lower or 'alert' in subject_lower or 'github' in sender.lower():
+            email_type = 'security'
+        elif 'noreply' in sender or 'unsubscribe' in body_lower:
+            email_type = 'promotional'
+        
+        return {
+            'priority': priority,
+            'email_type': email_type,
+            'urgency_reason': f'Classified as {priority} based on keywords and sender',
+            'ai_classified': False
+        }
+    
+    def get_unread_emails(self):
+        """Get real unread emails from Gmail"""
+        if not self.gmail_connected:
+            return self.get_demo_emails()
+        
+        try:
+            # Get unread emails from last 24 hours
+            yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y/%m/%d')
+            query = f'is:unread after:{yesterday} -from:me'
+            
+            result = self.gmail_service.users().messages().list(
+                userId='me', q=query, maxResults=50
+            ).execute()
+            
+            messages = result.get('messages', [])
+            emails = []
+            
+            for message in messages[:20]:  # Limit to 20 emails for performance
+                try:
+                    msg = self.gmail_service.users().messages().get(
+                        userId='me', id=message['id'], format='full'
+                    ).execute()
+                    
+                    headers = msg['payload'].get('headers', [])
+                    subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
+                    from_email = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
+                    to_field = next((h['value'] for h in headers if h['name'] == 'To'), '')
+                    cc_field = next((h['value'] for h in headers if h['name'] == 'Cc'), '')
+                    date_header = next((h['value'] for h in headers if h['name'] == 'Date'), '')
+                    
+                    # Get email body
+                    body = self._extract_email_body(msg['payload'])
+                    snippet = msg.get('snippet', '')
+                    
+                    # Parse date
+                    try:
+                        email_date = datetime.fromtimestamp(int(msg['internalDate']) / 1000)
+                        date_str = email_date.strftime('%Y-%m-%d')
+                        time_str = email_date.strftime('%H:%M')
+                    except:
+                        date_str = datetime.now().strftime('%Y-%m-%d')
+                        time_str = datetime.now().strftime('%H:%M')
+                    
+                    # Classify with AI
+                    classification = self.classify_email_with_ai(subject, body, from_email)
+                    
+                    emails.append({
+                        'id': message['id'],
+                        'subject': subject,
+                        'from_email': from_email,
+                        'to_field': to_field,
+                        'cc_field': cc_field,
+                        'snippet': snippet,
+                        'body': body[:1000] + '...' if len(body) > 1000 else body,
+                        'date': date_str,
+                        'time': time_str,
+                        'priority': classification['priority'],
+                        'email_type': classification['email_type'],
+                        'ai_classified': classification['ai_classified'],
+                        'urgency_reason': classification.get('urgency_reason', '')
+                    })
+                    
+                except Exception as e:
+                    print(f"❌ Error processing email {message['id']}: {e}")
+                    continue
+            
+            return emails
+            
+        except Exception as e:
+            print(f"❌ Error fetching emails: {e}")
+            return self.get_demo_emails()
+    
+    def _extract_email_body(self, payload):
+        """Extract text content from email payload"""
+        body = ""
+        
+        if 'parts' in payload:
+            for part in payload['parts']:
+                if part['mimeType'] == 'text/plain':
+                    data = part['body']['data']
+                    body = base64.urlsafe_b64decode(data).decode('utf-8')
+                    break
+                elif part['mimeType'] == 'text/html' and not body:
+                    data = part['body']['data']
+                    body = base64.urlsafe_b64decode(data).decode('utf-8')
+        elif payload['mimeType'] == 'text/plain':
+            data = payload['body']['data']
+            body = base64.urlsafe_b64decode(data).decode('utf-8')
+        
+        return body.strip()
+    
+    def create_ai_draft(self, original_email):
+        """Create an AI-powered draft reply"""
+        if not self.openai_available:
+            return self._create_basic_draft(original_email)
+        
+        try:
+            prompt = f"""Create a professional auto-reply for this email:
+
+Original Subject: {original_email['subject']}
+From: {original_email['from_email']}
+Priority: {original_email['priority']}
+Content: {original_email['body'][:500]}...
+
+Generate a professional acknowledgment email that:
+1. Acknowledges receipt
+2. Indicates understanding of priority level
+3. Provides appropriate response timeframe
+4. Maintains professional tone
+5. Is concise but personalized
+
+Format as plain text email body only."""
+
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=400,
+                temperature=0.7
+            )
+            
+            ai_body = response.choices[0].message.content.strip()
+            
+            # Add professional signature
+            full_body = f"""{ai_body}
+
+Best regards,
+Jai Mehtani
+Computer Science Student & Developer
+Charusat University
+📧 22dcs047@charusat.edu.in
+
+🤖 This is an AI-assisted acknowledgment. I will personally review and respond to your email."""
+
+            return full_body
+            
+        except Exception as e:
+            print(f"❌ AI draft creation error: {e}")
+            return self._create_basic_draft(original_email)
+    
+    def _create_basic_draft(self, original_email):
+        """Create basic template draft"""
+        priority_responses = {
+            'critical': 'I understand this is critical and will respond within 2 hours.',
+            'high': 'I understand this is important and will respond within 24 hours.',
+            'medium': 'I will respond within 2-3 business days.',
+            'low': 'I will respond within a week.'
+        }
+        
+        response_time = priority_responses.get(original_email['priority'], 'I will respond soon.')
+        
+        return f"""Thank you for your email regarding "{original_email['subject']}".
+
+I have received your message and {response_time}
+
+Best regards,
+Jai Mehtani
+Computer Science Student & Developer
+Charusat University
+📧 22dcs047@charusat.edu.in
+
+🤖 This is an automated acknowledgment. I will personally review and respond to your email."""
+    
+    def create_gmail_draft(self, original_email):
+        """Create actual Gmail draft"""
+        if not self.gmail_connected:
+            return False, "Gmail not connected"
+        
+        try:
+            # Generate AI-powered reply content
+            reply_body = self.create_ai_draft(original_email)
+            
+            # Create draft message
+            subject = f"Re: {original_email['subject']}"
+            
+            message = MIMEText(reply_body)
+            message['to'] = original_email['from_email']
+            message['subject'] = subject
+            
+            # Create draft
+            draft = {
+                'message': {
+                    'raw': base64.urlsafe_b64encode(message.as_bytes()).decode()
+                }
+            }
+            
+            created_draft = self.gmail_service.users().drafts().create(
+                userId='me', body=draft
+            ).execute()
+            
+            return True, f"Draft created with ID: {created_draft['id']}"
+            
+        except Exception as e:
+            return False, f"Error creating draft: {e}"
+    
     def get_demo_emails(self):
-        """Demo emails with current timestamps"""
+        """Demo emails for fallback"""
         now = datetime.now()
         today = now.strftime('%Y-%m-%d')
         
@@ -25,7 +373,7 @@ class SimpleGmailAssistant:
                 'id': 'demo_1',
                 'subject': '🔴 URGENT: Kaggle Competition Deadline in 3 Hours!',
                 'from_email': 'Kaggle <no-reply@kaggle.com>',
-                'priority': 'high',
+                'priority': 'critical',
                 'to_field': '22dcs047@charusat.edu.in',
                 'cc_field': '',
                 'snippet': 'Hi Jai Mehtani, Your submission deadline is approaching fast...',
@@ -33,7 +381,8 @@ class SimpleGmailAssistant:
                 'date': today,
                 'time': (now - timedelta(minutes=30)).strftime('%H:%M'),
                 'email_type': 'academic',
-                'ai_classified': self.openai_available
+                'ai_classified': self.openai_available,
+                'urgency_reason': 'Critical deadline approaching'
             },
             {
                 'id': 'demo_2',
@@ -47,29 +396,22 @@ class SimpleGmailAssistant:
                 'date': today,
                 'time': (now - timedelta(minutes=15)).strftime('%H:%M'),
                 'email_type': 'security',
-                'ai_classified': self.openai_available
-            },
-            {
-                'id': 'demo_3',
-                'subject': 'Assignment Submission Reminder - Due Tomorrow',
-                'from_email': 'Professor Smith <prof.smith@charusat.edu.in>',
-                'priority': 'high',
-                'to_field': 'class2024@charusat.edu.in',
-                'cc_field': '22dcs047@charusat.edu.in',
-                'snippet': 'Reminder: Final project submission deadline...',
-                'body': 'Dear Students, This is a reminder that your final project submission is due tomorrow at 11:59 PM.',
-                'date': today,
-                'time': (now - timedelta(hours=2)).strftime('%H:%M'),
-                'email_type': 'academic',
-                'ai_classified': self.openai_available
+                'ai_classified': self.openai_available,
+                'urgency_reason': 'Security threat detected'
             }
         ]
     
     def get_email_stats(self):
-        """Get email statistics"""
-        emails = self.get_demo_emails()
-        direct = [e for e in emails if self.user_email in e['to_field']]
-        cc = [e for e in emails if self.user_email in e['cc_field']]
+        """Get comprehensive email statistics"""
+        try:
+            emails = self.get_unread_emails()
+        except Exception as e:
+            print(f"❌ Error getting emails: {e}")
+            emails = self.get_demo_emails()
+        
+        # Separate direct and CC emails
+        direct = [e for e in emails if self.user_email in e.get('to_field', '')]
+        cc = [e for e in emails if self.user_email in e.get('cc_field', '') and self.user_email not in e.get('to_field', '')]
         high_priority = [e for e in emails if e['priority'] in ['high', 'critical']]
         
         return {
@@ -84,22 +426,25 @@ class SimpleGmailAssistant:
                 'ai_classified_count': len([e for e in emails if e.get('ai_classified', False)])
             },
             'last_updated': datetime.now().isoformat(),
-            'gmail_connected': False,  # Demo mode for Vercel
+            'gmail_connected': self.gmail_connected,
             'openai_connected': self.openai_available,
-            'data_source': 'Demo Data + AI' if self.openai_available else 'Demo Data',
+            'data_source': 'Real Gmail + AI' if self.gmail_connected and self.openai_available else 
+                          'Real Gmail' if self.gmail_connected else 
+                          'Demo Data + AI' if self.openai_available else 'Demo Data',
             'capabilities': {
-                'gmail_api': False,
+                'gmail_api': self.gmail_connected,
                 'ai_classification': self.openai_available,
-                'real_draft_creation': False
+                'real_draft_creation': self.gmail_connected
             }
         }
 
 # Initialize assistant
-assistant = SimpleGmailAssistant()
+assistant = RealGmailAssistant()
 
 @app.route('/')
 def home():
     status = "AI-Powered" if assistant.openai_available else "Standard"
+    gmail_status = "Connected" if assistant.gmail_connected else "Demo Mode"
     return f'''<!DOCTYPE html>
 <html>
 <head>
@@ -115,7 +460,7 @@ def home():
         .hero p {{ font-size: 1.3rem; margin-bottom: 40px; opacity: 0.9; }}
         .btn {{ background: white; color: #667eea; padding: 18px 35px; border: none; border-radius: 50px; font-size: 1.1rem; font-weight: 600; text-decoration: none; display: inline-block; margin: 10px 15px; transition: all 0.3s ease; box-shadow: 0 8px 25px rgba(0,0,0,0.15); }}
         .btn:hover {{ transform: translateY(-3px); box-shadow: 0 12px 35px rgba(0,0,0,0.2); color: #5a67d8; }}
-        .live-badge {{ background: linear-gradient(45deg, #ff6b6b, #ee5a24); color: white; padding: 12px 25px; border-radius: 50px; font-weight: 600; margin-bottom: 20px; display: inline-block; animation: pulse 2s infinite; }}
+        .live-badge {{ background: linear-gradient(45deg, #{'00b894, #00cec9' if assistant.gmail_connected else 'ff6b6b, #ee5a24'}); color: white; padding: 12px 25px; border-radius: 50px; font-weight: 600; margin-bottom: 20px; display: inline-block; animation: pulse 2s infinite; }}
         .ai-badge {{ background: linear-gradient(45deg, #00b894, #00cec9); color: white; padding: 12px 25px; border-radius: 50px; font-weight: 600; margin-bottom: 30px; display: inline-block; animation: glow 3s infinite; }}
         @keyframes pulse {{ 0% {{ transform: scale(1); }} 50% {{ transform: scale(1.05); }} 100% {{ transform: scale(1); }} }}
         @keyframes glow {{ 0% {{ box-shadow: 0 0 10px rgba(0,184,148,0.5); }} 50% {{ box-shadow: 0 0 25px rgba(0,184,148,0.8); }} 100% {{ box-shadow: 0 0 10px rgba(0,184,148,0.5); }} }}
@@ -124,11 +469,11 @@ def home():
 <body>
     <div class="container">
         <div class="hero">
-            <div class="live-badge"><i class="fas fa-satellite-dish"></i> LIVE DEMO SYSTEM <i class="fas fa-satellite-dish"></i></div>
+            <div class="live-badge"><i class="fas fa-{'satellite-dish' if assistant.gmail_connected else 'exclamation-triangle'}"></i> {gmail_status.upper()} <i class="fas fa-{'satellite-dish' if assistant.gmail_connected else 'exclamation-triangle'}"></i></div>
             <div class="ai-badge"><i class="fas fa-brain"></i> {status.upper()} INTELLIGENCE <i class="fas fa-robot"></i></div>
             <h1><i class="fas fa-envelope-open-text"></i> {status} Gmail Assistant</h1>
-            <p>Demo of Gmail integration with {'AI-powered' if assistant.openai_available else 'intelligent'} email classification and auto-replies</p>
-            <a href="/dashboard" class="btn"><i class="fas fa-rocket"></i> Open Live Dashboard</a>
+            <p>{'Real Gmail integration' if assistant.gmail_connected else 'Demo mode'} with {'AI-powered' if assistant.openai_available else 'intelligent'} email classification and auto-replies</p>
+            <a href="/dashboard" class="btn"><i class="fas fa-rocket"></i> Open Dashboard</a>
             <a href="/debug" class="btn" style="background: rgba(255,255,255,0.2); color: white;"><i class="fas fa-code"></i> System Status</a>
         </div>
     </div>
@@ -137,243 +482,74 @@ def home():
 
 @app.route('/dashboard')
 def dashboard():
-    return '''<!DOCTYPE html>
-<html>
-<head>
-    <title>AI Gmail Assistant Dashboard</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); min-height: 100vh; }
-        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
-        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 20px; margin-bottom: 30px; box-shadow: 0 15px 35px rgba(102, 126, 234, 0.2); }
-        .header h1 { font-size: 2.2rem; margin-bottom: 8px; }
-        .header p { opacity: 0.9; font-size: 1.1rem; }
-        .status-badge { padding: 8px 16px; border-radius: 20px; font-size: 0.9rem; margin: 5px; display: inline-block; }
-        .connected { background: rgba(76, 175, 80, 0.9); }
-        .demo { background: rgba(255, 152, 0, 0.9); }
-        .ai-enabled { background: rgba(0, 184, 148, 0.9); }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 25px; margin-bottom: 30px; }
-        .stat-card { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); text-align: center; transition: transform 0.3s ease; position: relative; }
-        .stat-card:hover { transform: translateY(-5px); }
-        .stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #667eea, #764ba2); }
-        .stat-card h3 { font-size: 2.5rem; color: #2c3e50; margin-bottom: 10px; }
-        .stat-card p { color: #7f8c8d; font-size: 1.1rem; font-weight: 500; }
-        .action-bar { background: white; padding: 25px; border-radius: 20px; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; }
-        .action-btn { padding: 15px 30px; border: none; border-radius: 50px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; font-size: 1rem; }
-        .action-btn.primary { background: linear-gradient(45deg, #00b894, #00cec9); color: white; }
-        .action-btn.secondary { background: #f8f9fa; color: #495057; border: 1px solid #dee2e6; }
-        .action-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
-        .email-section { background: white; border-radius: 20px; padding: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
-        .email-item { background: #f8f9fb; padding: 20px; margin: 15px 0; border-radius: 15px; border-left: 5px solid #ddd; transition: all 0.3s ease; position: relative; }
-        .email-item:hover { transform: translateX(5px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
-        .email-item.priority-critical { border-left-color: #dc3545; }
-        .email-item.priority-high { border-left-color: #fd7e14; }
-        .priority-badge { padding: 6px 12px; border-radius: 20px; color: white; font-size: 0.85rem; font-weight: 600; }
-        .priority-critical .priority-badge { background: #dc3545; }
-        .priority-high .priority-badge { background: #fd7e14; }
-        .ai-badge { position: absolute; top: 10px; right: 10px; background: linear-gradient(45deg, #00b894, #00cec9); color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 600; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <header class="header">
-            <h1><i class="fas fa-brain"></i> AI-Powered Gmail Assistant</h1>
-            <p>Demo of Gmail integration with OpenAI intelligence for smart email management</p>
-            <div>
-                <div id="connectionStatus" class="status-badge"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
-                <div id="aiStatus" class="status-badge"><i class="fas fa-spinner fa-spin"></i> Loading AI...</div>
-            </div>
-        </header>
+    try:
+        with open('../dashboard.html', 'r') as f:
+            return f.read()
+    except FileNotFoundError:
+        return "Dashboard file not found", 404
 
-        <div class="stats-grid">
-            <div class="stat-card"><h3 id="totalEmails">0</h3><p><i class="fas fa-inbox"></i> Total Unread</p></div>
-            <div class="stat-card"><h3 id="directEmails">0</h3><p><i class="fas fa-at"></i> Direct Emails</p></div>
-            <div class="stat-card"><h3 id="highPriority">0</h3><p><i class="fas fa-exclamation-triangle"></i> High Priority</p></div>
-            <div class="stat-card"><h3 id="aiClassified">0</h3><p><i class="fas fa-robot"></i> AI Classified</p></div>
-        </div>
-
-        <div class="action-bar">
-            <div>
-                <button class="action-btn primary" onclick="createAIDrafts()"><i class="fas fa-brain"></i> Demo AI Features</button>
-                <button class="action-btn secondary" onclick="refreshEmails()"><i class="fas fa-sync-alt"></i> Refresh Demo</button>
-                <button class="action-btn secondary" onclick="window.location.href='/debug'"><i class="fas fa-bug"></i> System Status</button>
-            </div>
-            <div style="color: #6c757d;"><i class="fas fa-clock"></i> Last updated: <span id="lastUpdated">Never</span></div>
-        </div>
-
-        <section class="email-section">
-            <h2><i class="fas fa-envelope"></i> Demo Email Management</h2>
-            <div id="emailList">Loading emails...</div>
-        </section>
-    </div>
-
-    <script>
-        async function loadEmails() {
-            try {
-                const response = await fetch('/api/emails');
-                const data = await response.json();
-                
-                document.getElementById('totalEmails').textContent = data.stats.total_unread;
-                document.getElementById('directEmails').textContent = data.stats.direct_count;
-                document.getElementById('highPriority').textContent = data.stats.high_priority_count;
-                document.getElementById('aiClassified').textContent = data.stats.ai_classified_count || 0;
-                
-                // Update status badges
-                const statusEl = document.getElementById('connectionStatus');
-                const aiStatusEl = document.getElementById('aiStatus');
-                
-                statusEl.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Demo Mode';
-                statusEl.className = 'status-badge demo';
-                
-                if (data.openai_connected) {
-                    aiStatusEl.innerHTML = '<i class="fas fa-brain"></i> AI Enabled';
-                    aiStatusEl.className = 'status-badge ai-enabled';
-                } else {
-                    aiStatusEl.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Basic Mode';
-                    aiStatusEl.className = 'status-badge demo';
-                }
-                
-                // Display emails
-                const emailList = document.getElementById('emailList');
-                let html = '';
-                data.direct_emails.forEach(email => {
-                    const icon = {'critical': '🚨', 'high': '🔴', 'medium': '🟡', 'low': '🟢'}[email.priority] || '⚪';
-                    const aiBadge = email.ai_classified ? '<div class="ai-badge"><i class="fas fa-brain"></i> AI</div>' : '';
-                    html += `
-                        <div class="email-item priority-${email.priority}">
-                            ${aiBadge}
-                            <div style="display: flex; justify-content: space-between; align-items: start;">
-                                <div style="flex: 1;">
-                                    <h4 style="margin-bottom: 8px;">${email.subject}</h4>
-                                    <p style="color: #666; font-size: 0.9rem; margin-bottom: 8px;">${email.from_email}</p>
-                                    <p style="margin-bottom: 10px;">${email.snippet}</p>
-                                    <small style="color: #888;"><i class="fas fa-clock"></i> ${email.date} ${email.time}</small>
-                                </div>
-                                <div class="priority-badge">${icon} ${email.priority.toUpperCase()}</div>
-                            </div>
-                        </div>
-                    `;
-                });
-                emailList.innerHTML = html;
-                
-                document.getElementById('lastUpdated').textContent = new Date(data.last_updated).toLocaleString();
-            } catch (error) {
-                console.error('Error loading emails:', error);
-                document.getElementById('emailList').innerHTML = '<p>Error loading emails</p>';
-            }
-        }
-        
-        async function refreshEmails() {
-            document.getElementById('emailList').innerHTML = 'Refreshing demo...';
-            await loadEmails();
-            showNotification('Demo refreshed!', 'success');
-        }
-        
-        async function createAIDrafts() {
-            showNotification('This is a demo - AI features would create intelligent drafts in the real version!', 'info');
-        }
-        
-        function showNotification(message, type) {
-            const notification = document.createElement('div');
-            const colors = { 'success': '#28a745', 'error': '#dc3545', 'info': '#17a2b8' };
-            notification.style.cssText = `position: fixed; top: 20px; right: 20px; padding: 15px 25px; border-radius: 10px; color: white; font-weight: 600; z-index: 1001; background: ${colors[type]};`;
-            notification.textContent = message;
-            document.body.appendChild(notification);
-            setTimeout(() => notification.remove(), 4000);
-        }
-        
-        loadEmails();
-        setInterval(loadEmails, 120000);
-    </script>
-</body>
-</html>'''
-
-@app.route('/debug')
+@app.route('/debug') 
 def debug():
-    return '''<!DOCTYPE html>
-<html>
-<head>
-    <title>System Status</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
-        pre { background: #f5f5f5; padding: 15px; border-radius: 4px; overflow: auto; max-height: 500px; }
-        .btn { background: #1a73e8; color: white; padding: 10px 20px; border: none; border-radius: 4px; margin: 5px; cursor: pointer; }
-        .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
-        .connected { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .disconnected { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .ai-enabled { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🔍 System Status</h1>
-        <button class="btn" onclick="loadDebug()">Refresh Status</button>
-        <button class="btn" onclick="window.location.href='/'">Home</button>
-        <button class="btn" onclick="window.location.href='/dashboard'">Dashboard</button>
-        
-        <div id="statusInfo">Loading...</div>
-        
-        <h3>📊 System Information</h3>
-        <pre id="debugInfo">Loading...</pre>
-    </div>
-    <script>
-        async function loadDebug() {
-            try {
-                const response = await fetch('/api/debug');
-                const data = await response.json();
-                
-                const statusDiv = document.getElementById('statusInfo');
-                let statusHTML = `
-                    <div class="status disconnected">
-                        <h3>📱 Demo Mode Active</h3>
-                        <p>This is a demonstration version showing the interface</p>
-                    </div>
-                `;
-                
-                if (data.openai_connected) {
-                    statusHTML += `
-                        <div class="status ai-enabled">
-                            <h3>🧠 OpenAI Integration: READY</h3>
-                            <p>AI features would be enabled in the full version</p>
-                        </div>
-                    `;
-                } else {
-                    statusHTML += `
-                        <div class="status disconnected">
-                            <h3>🧠 AI Features: Demo Mode</h3>
-                            <p>Add OpenAI API key to enable AI features</p>
-                        </div>
-                    `;
-                }
-                
-                statusDiv.innerHTML = statusHTML;
-                document.getElementById('debugInfo').textContent = JSON.stringify(data, null, 2);
-            } catch (error) {
-                document.getElementById('debugInfo').textContent = 'Error: ' + error.message;
-            }
-        }
-        loadDebug();
-    </script>
-</body>
-</html>'''
+    try:
+        with open('../debug.html', 'r') as f:
+            return f.read()
+    except FileNotFoundError:
+        return "Debug file not found", 404
 
 @app.route('/api/emails')
 def api_emails():
     return jsonify(assistant.get_email_stats())
 
+@app.route('/api/create-drafts', methods=['POST'])
+def api_create_drafts():
+    try:
+        data = request.json
+        emails = data.get('emails', [])
+        
+        if not assistant.gmail_connected:
+            return jsonify({
+                'success': False,
+                'error': 'Gmail not connected - running in demo mode'
+            })
+        
+        drafts_created = 0
+        errors = []
+        
+        for email in emails:
+            try:
+                success, message = assistant.create_gmail_draft(email)
+                if success:
+                    drafts_created += 1
+                else:
+                    errors.append(f"Failed to create draft for '{email['subject']}': {message}")
+            except Exception as e:
+                errors.append(f"Error with email '{email['subject']}': {str(e)}")
+        
+        return jsonify({
+            'success': drafts_created > 0,
+            'drafts_created': drafts_created,
+            'errors': errors,
+            'message': f'Created {drafts_created} drafts successfully'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
 @app.route('/api/debug')
 def api_debug():
     return jsonify({
-        'gmail_connected': False,
+        'gmail_connected': assistant.gmail_connected,
         'openai_connected': assistant.openai_available,
         'data_source': assistant.get_email_stats()['data_source'],
         'capabilities': assistant.get_email_stats()['capabilities'],
         'stats': assistant.get_email_stats()['stats'],
         'environment': {
             'openai_key_exists': bool(os.getenv('OPENAI_API_KEY')),
+            'gmail_libraries_available': GMAIL_AVAILABLE,
+            'openai_libraries_available': OPENAI_AVAILABLE,
             'platform': 'vercel'
         }
     })
