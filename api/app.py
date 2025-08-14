@@ -482,19 +482,443 @@ def home():
 
 @app.route('/dashboard')
 def dashboard():
-    try:
-        with open('dashboard.html', 'r') as f:
-            return f.read()
-    except FileNotFoundError:
-        return "Dashboard file not found", 404
+    # Embedded HTML to ensure it works on Vercel
+    return '''<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Gmail Assistant Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); min-height: 100vh; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 20px; margin-bottom: 30px; box-shadow: 0 15px 35px rgba(102, 126, 234, 0.2); }
+        .header h1 { font-size: 2.2rem; margin-bottom: 8px; }
+        .header p { opacity: 0.9; font-size: 1.1rem; }
+        .status-badge { padding: 8px 16px; border-radius: 20px; font-size: 0.9rem; margin: 5px; display: inline-block; }
+        .connected { background: rgba(76, 175, 80, 0.9); }
+        .demo { background: rgba(255, 152, 0, 0.9); }
+        .ai-enabled { background: rgba(0, 184, 148, 0.9); }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 25px; margin-bottom: 30px; }
+        .stat-card { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); text-align: center; transition: transform 0.3s ease; position: relative; }
+        .stat-card:hover { transform: translateY(-5px); }
+        .stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #667eea, #764ba2); }
+        .stat-card h3 { font-size: 2.5rem; color: #2c3e50; margin-bottom: 10px; }
+        .stat-card p { color: #7f8c8d; font-size: 1.1rem; font-weight: 500; }
+        .action-bar { background: white; padding: 25px; border-radius: 20px; margin-bottom: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; }
+        .action-btn { padding: 15px 30px; border: none; border-radius: 50px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; font-size: 1rem; }
+        .action-btn.primary { background: linear-gradient(45deg, #00b894, #00cec9); color: white; }
+        .action-btn.secondary { background: #f8f9fa; color: #495057; border: 1px solid #dee2e6; }
+        .action-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
+        .action-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        .email-section { background: white; border-radius: 20px; padding: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .email-tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab-btn { padding: 12px 24px; border: none; border-radius: 10px; background: #f8f9fa; color: #495057; cursor: pointer; transition: all 0.3s ease; }
+        .tab-btn.active { background: linear-gradient(45deg, #667eea, #764ba2); color: white; }
+        .email-item { background: #f8f9fb; padding: 20px; margin: 15px 0; border-radius: 15px; border-left: 5px solid #ddd; transition: all 0.3s ease; position: relative; cursor: pointer; }
+        .email-item:hover { transform: translateX(5px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
+        .email-item.priority-critical { border-left-color: #dc3545; }
+        .email-item.priority-high { border-left-color: #fd7e14; }
+        .email-item.priority-medium { border-left-color: #ffc107; }
+        .email-item.priority-low { border-left-color: #28a745; }
+        .priority-badge { padding: 6px 12px; border-radius: 20px; color: white; font-size: 0.85rem; font-weight: 600; }
+        .priority-critical .priority-badge { background: #dc3545; }
+        .priority-high .priority-badge { background: #fd7e14; }
+        .priority-medium .priority-badge { background: #ffc107; color: #212529; }
+        .priority-low .priority-badge { background: #28a745; }
+        .ai-badge { position: absolute; top: 10px; right: 10px; background: linear-gradient(45deg, #00b894, #00cec9); color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: 600; }
+        .notification { position: fixed; top: 20px; right: 20px; padding: 15px 25px; border-radius: 10px; color: white; font-weight: 600; z-index: 1001; animation: slideIn 0.3s ease; }
+        .notification.success { background: #28a745; }
+        .notification.error { background: #dc3545; }
+        .notification.info { background: #17a2b8; }
+        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1><i class="fas fa-brain"></i> AI-Powered Gmail Assistant</h1>
+            <p>Real Gmail integration with OpenAI intelligence for smart email management</p>
+            <div>
+                <div id="connectionStatus" class="status-badge"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+                <div id="aiStatus" class="status-badge"><i class="fas fa-spinner fa-spin"></i> Loading AI...</div>
+            </div>
+        </header>
+
+        <div class="stats-grid">
+            <div class="stat-card"><h3 id="totalEmails">0</h3><p><i class="fas fa-inbox"></i> Total Unread</p></div>
+            <div class="stat-card"><h3 id="directEmails">0</h3><p><i class="fas fa-at"></i> Direct Emails</p></div>
+            <div class="stat-card"><h3 id="highPriority">0</h3><p><i class="fas fa-exclamation-triangle"></i> High Priority</p></div>
+            <div class="stat-card"><h3 id="aiClassified">0</h3><p><i class="fas fa-robot"></i> AI Classified</p></div>
+        </div>
+
+        <div class="action-bar">
+            <div>
+                <button class="action-btn primary" onclick="createRealDrafts()" id="createDraftsBtn">
+                    <i class="fas fa-brain"></i> Create AI-Powered Drafts
+                </button>
+                <button class="action-btn secondary" onclick="refreshEmails()">
+                    <i class="fas fa-sync-alt"></i> Refresh Emails
+                </button>
+                <button class="action-btn secondary" onclick="window.location.href='/debug'">
+                    <i class="fas fa-bug"></i> System Status
+                </button>
+            </div>
+            <div style="color: #6c757d;">
+                <i class="fas fa-clock"></i> Last updated: <span id="lastUpdated">Never</span>
+            </div>
+        </div>
+
+        <section class="email-section">
+            <h2><i class="fas fa-envelope"></i> Email Management</h2>
+            <div class="email-tabs">
+                <button class="tab-btn active" onclick="switchTab('direct')">
+                    <i class="fas fa-at"></i> Direct Emails (<span id="directCount">0</span>)
+                </button>
+                <button class="tab-btn" onclick="switchTab('cc')">
+                    <i class="fas fa-users"></i> CC'd Emails (<span id="ccCount">0</span>)
+                </button>
+            </div>
+            <div id="emailList">Loading emails...</div>
+        </section>
+    </div>
+
+    <script>
+        let currentTab = 'direct';
+        let emailData = null;
+
+        async function loadEmails() {
+            try {
+                const response = await fetch('/api/emails');
+                const data = await response.json();
+                emailData = data;
+                
+                document.getElementById('totalEmails').textContent = data.stats.total_unread;
+                document.getElementById('directEmails').textContent = data.stats.direct_count;
+                document.getElementById('highPriority').textContent = data.stats.high_priority_count;
+                document.getElementById('aiClassified').textContent = data.stats.ai_classified_count || 0;
+                document.getElementById('directCount').textContent = data.stats.direct_count;
+                document.getElementById('ccCount').textContent = data.stats.cc_count;
+                
+                const statusEl = document.getElementById('connectionStatus');
+                const aiStatusEl = document.getElementById('aiStatus');
+                
+                if (data.gmail_connected) {
+                    statusEl.innerHTML = '<i class="fas fa-check-circle"></i> Gmail Connected';
+                    statusEl.className = 'status-badge connected';
+                } else {
+                    statusEl.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Demo Mode';
+                    statusEl.className = 'status-badge demo';
+                }
+                
+                if (data.openai_connected) {
+                    aiStatusEl.innerHTML = '<i class="fas fa-brain"></i> AI Enabled';
+                    aiStatusEl.className = 'status-badge ai-enabled';
+                } else {
+                    aiStatusEl.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Basic Mode';
+                    aiStatusEl.className = 'status-badge demo';
+                }
+                
+                const draftBtn = document.getElementById('createDraftsBtn');
+                if (data.gmail_connected && data.openai_connected) {
+                    draftBtn.innerHTML = '<i class="fas fa-brain"></i> Create AI-Powered Drafts';
+                    draftBtn.disabled = false;
+                } else if (data.gmail_connected) {
+                    draftBtn.innerHTML = '<i class="fas fa-envelope"></i> Create Basic Drafts';
+                    draftBtn.disabled = false;
+                } else {
+                    draftBtn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Demo Only';
+                    draftBtn.disabled = true;
+                }
+                
+                displayEmails();
+                document.getElementById('lastUpdated').textContent = new Date(data.last_updated).toLocaleString();
+            } catch (error) {
+                console.error('Error loading emails:', error);
+                showNotification('Error loading emails: ' + error.message, 'error');
+            }
+        }
+        
+        function displayEmails() {
+            if (!emailData) return;
+            
+            const emails = currentTab === 'direct' ? emailData.direct_emails : emailData.cc_emails;
+            const emailList = document.getElementById('emailList');
+            
+            if (emails.length === 0) {
+                emailList.innerHTML = '<p style="text-align: center; color: #666; padding: 40px;">No emails found in this category.</p>';
+                return;
+            }
+            
+            let html = '';
+            emails.forEach(email => {
+                const icon = {'critical': '🚨', 'high': '🔴', 'medium': '🟡', 'low': '🟢'}[email.priority] || '⚪';
+                const aiBadge = email.ai_classified ? '<div class="ai-badge"><i class="fas fa-brain"></i> AI</div>' : '';
+                html += `
+                    <div class="email-item priority-${email.priority}">
+                        ${aiBadge}
+                        <div style="display: flex; justify-content: space-between; align-items: start;">
+                            <div style="flex: 1;">
+                                <h4 style="margin-bottom: 8px;">${email.subject}</h4>
+                                <p style="color: #666; font-size: 0.9rem; margin-bottom: 8px;">${email.from_email}</p>
+                                <p style="margin-bottom: 10px;">${email.snippet}</p>
+                                <small style="color: #888;">
+                                    <i class="fas fa-clock"></i> ${email.date} ${email.time}
+                                    ${email.email_type ? `<span style="margin-left: 15px;"><i class="fas fa-tag"></i> ${email.email_type}</span>` : ''}
+                                </small>
+                            </div>
+                            <div class="priority-badge">${icon} ${email.priority.toUpperCase()}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            emailList.innerHTML = html;
+        }
+        
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            displayEmails();
+        }
+        
+        async function refreshEmails() {
+            document.getElementById('emailList').innerHTML = 'Refreshing emails...';
+            await loadEmails();
+            showNotification('Emails refreshed successfully!', 'success');
+        }
+        
+        async function createRealDrafts() {
+            if (!emailData) {
+                showNotification('Please load emails first', 'error');
+                return;
+            }
+            
+            const highPriorityEmails = [...emailData.direct_emails, ...emailData.cc_emails]
+                .filter(email => email.priority === 'high' || email.priority === 'critical');
+            
+            if (highPriorityEmails.length === 0) {
+                showNotification('No high/critical priority emails found', 'info');
+                return;
+            }
+            
+            const draftBtn = document.getElementById('createDraftsBtn');
+            const originalText = draftBtn.innerHTML;
+            draftBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating Drafts...';
+            draftBtn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/create-drafts', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({emails: highPriorityEmails})
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showNotification(`Successfully created ${result.drafts_created} drafts!`, 'success');
+                } else {
+                    showNotification('Error creating drafts: ' + result.error, 'error');
+                }
+            } catch (error) {
+                showNotification('Error creating drafts: ' + error.message, 'error');
+            } finally {
+                draftBtn.innerHTML = originalText;
+                draftBtn.disabled = false;
+            }
+        }
+        
+        function showNotification(message, type) {
+            document.querySelectorAll('.notification').forEach(n => n.remove());
+            
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            setTimeout(() => notification.remove(), 5000);
+        }
+        
+        loadEmails();
+        setInterval(loadEmails, 120000);
+    </script>
+</body>
+</html>'''
 
 @app.route('/debug') 
 def debug():
-    try:
-        with open('debug.html', 'r') as f:
-            return f.read()
-    except FileNotFoundError:
-        return "Debug file not found", 404
+    # Embedded HTML to ensure it works on Vercel
+    return '''<!DOCTYPE html>
+<html>
+<head>
+    <title>System Status - Gmail Assistant</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); min-height: 100vh; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 20px; margin-bottom: 30px; text-align: center; }
+        .btn { background: #1a73e8; color: white; padding: 12px 24px; border: none; border-radius: 8px; margin: 8px; cursor: pointer; font-weight: 600; transition: all 0.3s ease; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(26, 115, 232, 0.3); }
+        .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .status-card { background: white; padding: 25px; border-radius: 15px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); }
+        .status { padding: 15px; border-radius: 10px; margin: 15px 0; font-weight: 600; }
+        .connected { background: #d4edda; color: #155724; border-left: 5px solid #28a745; }
+        .disconnected { background: #f8d7da; color: #721c24; border-left: 5px solid #dc3545; }
+        .demo { background: #fff3cd; color: #856404; border-left: 5px solid #ffc107; }
+        .ai-enabled { background: #d1ecf1; color: #0c5460; border-left: 5px solid #17a2b8; }
+        .info-section { background: white; padding: 25px; border-radius: 15px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); }
+        pre { background: #f8f9fa; padding: 20px; border-radius: 8px; overflow: auto; max-height: 400px; border: 1px solid #e9ecef; }
+        .capability { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #eee; }
+        .capability:last-child { border-bottom: none; }
+        .capability-status { font-weight: 600; }
+        .capability-status.enabled { color: #28a745; }
+        .capability-status.disabled { color: #dc3545; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1><i class="fas fa-cog"></i> System Status & Diagnostics</h1>
+            <p>Monitor Gmail Assistant connections and capabilities</p>
+        </header>
+        
+        <div style="text-align: center; margin-bottom: 30px;">
+            <button class="btn" onclick="loadDebug()"><i class="fas fa-sync-alt"></i> Refresh Status</button>
+            <button class="btn" onclick="window.location.href='/'">
+<i class="fas fa-home"></i> Home</button>
+            <button class="btn" onclick="window.location.href='/dashboard'">
+<i class="fas fa-tachometer-alt"></i> Dashboard</button>
+        </div>
+        
+        <div class="status-grid">
+            <div class="status-card">
+                <h3><i class="fas fa-envelope"></i> Gmail Connection</h3>
+                <div id="gmailStatus">Loading...</div>
+            </div>
+            
+            <div class="status-card">
+                <h3><i class="fas fa-brain"></i> AI Integration</h3>
+                <div id="aiStatus">Loading...</div>
+            </div>
+        </div>
+        
+        <div class="status-grid">
+            <div class="status-card">
+                <h3><i class="fas fa-list"></i> System Capabilities</h3>
+                <div id="capabilities">Loading...</div>
+            </div>
+            
+            <div class="status-card">
+                <h3><i class="fas fa-chart-bar"></i> Email Statistics</h3>
+                <div id="statistics">Loading...</div>
+            </div>
+        </div>
+        
+        <div class="info-section">
+            <h3><i class="fas fa-info-circle"></i> Detailed System Information</h3>
+            <pre id="debugInfo">Loading system information...</pre>
+        </div>
+    </div>
+    
+    <script>
+        async function loadDebug() {
+            try {
+                const response = await fetch('/api/debug');
+                const data = await response.json();
+                
+                const gmailDiv = document.getElementById('gmailStatus');
+                if (data.gmail_connected) {
+                    gmailDiv.innerHTML = `
+                        <div class="status connected">
+                            <h4><i class="fas fa-check-circle"></i> Gmail API: CONNECTED</h4>
+                            <p>Successfully connected to Gmail API. Can read emails and create drafts.</p>
+                        </div>
+                    `;
+                } else {
+                    gmailDiv.innerHTML = `
+                        <div class="status disconnected">
+                            <h4><i class="fas fa-times-circle"></i> Gmail API: NOT CONNECTED</h4>
+                            <p>Running in demo mode. Need valid Gmail credentials for real functionality.</p>
+                        </div>
+                    `;
+                }
+                
+                const aiDiv = document.getElementById('aiStatus');
+                if (data.openai_connected) {
+                    aiDiv.innerHTML = `
+                        <div class="status ai-enabled">
+                            <h4><i class="fas fa-brain"></i> OpenAI: ENABLED</h4>
+                            <p>AI-powered email classification and draft generation available.</p>
+                        </div>
+                    `;
+                } else {
+                    aiDiv.innerHTML = `
+                        <div class="status demo">
+                            <h4><i class="fas fa-exclamation-triangle"></i> OpenAI: BASIC MODE</h4>
+                            <p>Using rule-based classification. Add OpenAI API key for AI features.</p>
+                        </div>
+                    `;
+                }
+                
+                const capabilitiesDiv = document.getElementById('capabilities');
+                const caps = data.capabilities;
+                capabilitiesDiv.innerHTML = `
+                    <div class="capability">
+                        <span><i class="fas fa-envelope-open"></i> Gmail API Access</span>
+                        <span class="capability-status ${caps.gmail_api ? 'enabled' : 'disabled'}">
+                            ${caps.gmail_api ? '✅ ENABLED' : '❌ DISABLED'}
+                        </span>
+                    </div>
+                    <div class="capability">
+                        <span><i class="fas fa-brain"></i> AI Classification</span>
+                        <span class="capability-status ${caps.ai_classification ? 'enabled' : 'disabled'}">
+                            ${caps.ai_classification ? '✅ ENABLED' : '❌ DISABLED'}
+                        </span>
+                    </div>
+                    <div class="capability">
+                        <span><i class="fas fa-edit"></i> Real Draft Creation</span>
+                        <span class="capability-status ${caps.real_draft_creation ? 'enabled' : 'disabled'}">
+                            ${caps.real_draft_creation ? '✅ ENABLED' : '❌ DISABLED'}
+                        </span>
+                    </div>
+                `;
+                
+                const statsDiv = document.getElementById('statistics');
+                const stats = data.stats;
+                statsDiv.innerHTML = `
+                    <div class="capability">
+                        <span>Total Unread Emails</span>
+                        <span class="capability-status enabled">${stats.total_unread}</span>
+                    </div>
+                    <div class="capability">
+                        <span>Direct Emails</span>
+                        <span class="capability-status enabled">${stats.direct_count}</span>
+                    </div>
+                    <div class="capability">
+                        <span>High Priority Emails</span>
+                        <span class="capability-status enabled">${stats.high_priority_count}</span>
+                    </div>
+                    <div class="capability">
+                        <span>AI Classified</span>
+                        <span class="capability-status enabled">${stats.ai_classified_count}</span>
+                    </div>
+                `;
+                
+                document.getElementById('debugInfo').textContent = JSON.stringify(data, null, 2);
+                
+            } catch (error) {
+                document.getElementById('debugInfo').textContent = 'Error loading debug info: ' + error.message;
+                console.error('Debug error:', error);
+            }
+        }
+        
+        loadDebug();
+    </script>
+</body>
+</html>'''
 
 @app.route('/api/emails')
 def api_emails():
