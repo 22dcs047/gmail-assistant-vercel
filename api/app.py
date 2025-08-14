@@ -483,7 +483,7 @@ def home():
 @app.route('/dashboard')
 def dashboard():
     try:
-        with open('../dashboard.html', 'r') as f:
+        with open('dashboard.html', 'r') as f:
             return f.read()
     except FileNotFoundError:
         return "Dashboard file not found", 404
@@ -491,7 +491,7 @@ def dashboard():
 @app.route('/debug') 
 def debug():
     try:
-        with open('../debug.html', 'r') as f:
+        with open('debug.html', 'r') as f:
             return f.read()
     except FileNotFoundError:
         return "Debug file not found", 404
